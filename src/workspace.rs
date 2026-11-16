@@ -79,21 +79,27 @@ fn parse_entries(src: &str) -> Vec<EntryLine> {
 
 impl Workspace {
     /// `--workspace`/`$WHURL_WORKSPACE`, else the nearest ancestor of the cwd holding `requests/`
-    /// and `env/`.
-    pub fn discover(explicit: Option<PathBuf>) -> Result<Self> {
+    /// and `env/`, else the config's `workspace`.
+    pub fn discover(explicit: Option<PathBuf>, configured: Option<PathBuf>) -> Result<Self> {
         let is_ws = |p: &Path| p.join("requests").is_dir() && p.join("env").is_dir();
-        if let Some(p) = explicit {
+        let checked = |p: PathBuf| -> Result<Self> {
             let p = fs::canonicalize(&p).with_context(|| format!("workspace {}", p.display()))?;
             if !is_ws(&p) {
                 bail!("{} has no requests/ and env/ directories", p.display());
             }
-            return Ok(Self { root: p });
+            Ok(Self { root: p })
+        };
+        if let Some(p) = explicit {
+            return checked(p);
         }
         if let Ok(cwd) = std::env::current_dir()
             && let Some(p) = cwd.ancestors().find(|p| is_ws(p)) {
                 return Ok(Self { root: p.to_path_buf() });
             }
-        bail!("no workspace found; pass --workspace or set WHURL_WORKSPACE")
+        if let Some(p) = configured {
+            return checked(p);
+        }
+        bail!("no workspace found; pass --workspace, set WHURL_WORKSPACE, or set `workspace` in the config")
     }
 
     pub fn requests_dir(&self) -> PathBuf {

@@ -22,7 +22,31 @@ env/shared.secrets.env      --secrets-file (every env)
 ```
 
 Found via `--workspace`, `$WHURL_WORKSPACE`, the nearest ancestor of the cwd with `requests/`
-and `env/`. Set `WHURL_WORKSPACE` to use one workspace from anywhere. The env defaults to `$HURL_ENV`, then `local`.
+and `env/`, then `workspace` in the config. The env defaults to `-e`, `$HURL_ENV`, the config's
+`run.default_env`, then `local`.
+
+## Config
+
+`$XDG_CONFIG_HOME/whurl/config.toml` (default `~/.config/whurl/config.toml`). Optional; unknown
+keys are errors.
+
+```toml
+workspace = "~/path/to/workspace"   # used when the cwd isn't inside one
+
+[ui]
+wrap = true                       # `w` toggles
+auto_switch_response = true
+
+[request]
+sections = ["headers", "body", "curl"]   # display order; omit one to hide it
+
+[response]
+sections = ["headers", "body"]
+
+[run]
+default_env = "staging"
+asserts = false
+```
 
 ## CLI
 
@@ -47,13 +71,16 @@ Exit status: hurl's exit code when the run fails, 2 for whurl errors.
 
 ## TUI
 
-`enter` run · `/` filter · `e`/`E` env · `t` asserts · `tab`/`1-5` Body, Headers, Request,
-Timing, Source · `[ ]` entries in a chained file · `space`, `ctrl-d/u`, `J/K`, `h/l` scroll ·
-`x`/`X` export Markdown/JSON to `.whurl/exports/` · `o` open in `$EDITOR` · `R` reload · `?` help.
+`tab` moves focus between the sidebar and the main pane; `↑↓`/`jk`, `g`/`G` act on the focused one
+(main also: `space`, `ctrl-d/u` page, `h/l` horizontal scroll with wrap off). Anywhere: `enter` run · `/` filter ·
+`e`/`E` env · `t` asserts · `1-4` Request, Response, Meta, Source · `w` wrap · `[ ]` entries in
+a chained file · `x`/`X` export Markdown/JSON to `.whurl/exports/` · `o` open in `$EDITOR` ·
+`R` reload · `?` all keys.
 
-The summary shows the latency waterfall (dns, connect, tls, send, wait, download) and a sparkline
-of the last 30 runs of the request in the current env; the Timing tab adds per-phase bars and
-min/p50/p90/max.
+The tab stays put as you move between requests; when a run you started finishes and the request
+is still selected, the view switches to Response. The summary shows the latency waterfall (dns, connect,
+tls, send, wait, download) and a sparkline of the last 30 runs in the current env; Meta adds
+per-phase bars, min/p50/p90/max, asserts, and captures.
 
 ## Secrets
 

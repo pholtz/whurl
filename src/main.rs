@@ -1,3 +1,4 @@
+mod config;
 mod export;
 mod print;
 mod run;
@@ -19,7 +20,7 @@ use workspace::Workspace;
 #[command(version)]
 struct Cli {
     /// Workspace root (holds requests/ and env/). Defaults to the nearest ancestor of the
-    /// current directory that has both.
+    /// current directory that has both, then `workspace` in the config file.
     #[arg(long, global = true, env = "WHURL_WORKSPACE")]
     workspace: Option<PathBuf>,
 
@@ -83,9 +84,9 @@ enum Cmd {
 
 #[derive(Args)]
 struct EnvArg {
-    /// Environment: a file env/<ENV>.env.
-    #[arg(short, long, env = "HURL_ENV", default_value = "local")]
-    env: String,
+    /// Environment: a file env/<ENV>.env. Default: `run.default_env` in the config, then local.
+    #[arg(short, long, env = "HURL_ENV")]
+    env: Option<String>,
 }
 
 #[derive(Args)]
@@ -141,19 +142,24 @@ fn main() {
 
 fn real_main() -> Result<()> {
     let cli = Cli::parse();
-    let ws = Workspace::discover(cli.workspace)?;
+    let cfg = config::Config::load()?;
+    let ws = Workspace::discover(cli.workspace, cfg.workspace())?;
     match cli.cmd {
         None if std::io::stdout().is_terminal() => {
-            tui::run(ws, None, std::env::var("HURL_ENV").unwrap_or_else(|_| "local".into()))
+            let env = cfg.env(std::env::var("HURL_ENV").ok().filter(|e| !e.is_empty()));
+            tui::run(ws, cfg, None, env)
         }
         None => {
             use clap::CommandFactory;
             Cli::command().print_help()?;
             Ok(())
         }
-        Some(Cmd::Tui { query, env }) => tui::run(ws, query, env.env),
+        Some(Cmd::Tui { query, env }) => {
+            let env = cfg.env(env.env);
+            tui::run(ws, cfg, query, env)
+        }
         Some(Cmd::List { query, json }) => list(&ws, &query.join(" "), json),
-        Some(Cmd::Run(args)) => run_cmd(&ws, args),
+        Some(Cmd::Run(args)) => run_cmd(&ws, &cfg, args),
         Some(Cmd::Show { run, out }) => {
             let r = store::find(&ws, &run)?;
             output(&ws, &r, &out)
@@ -212,14 +218,14 @@ fn render_export(r: &run::Run, format: Format) -> String {
     }
 }
 
-fn run_cmd(ws: &Workspace, a: RunArgs) -> Result<()> {
+fn run_cmd(ws: &Workspace, cfg: &config::Config, a: RunArgs) -> Result<()> {
     let req = ws.resolve(&a.target)?;
-    let env = a.env.env;
+    let env = cfg.env(a.env.env);
     ws.vars_file(&env)?;
     if !a.out.body && !a.out.json && !a.out.md && std::io::stderr().is_terminal() {
         eprintln!("{}", print::Paint::stderr().dim(&format!("running {} [{env}]…", req.rel)));
     }
-    let r = run::run(ws, &req, &run::RunOpts { env, asserts: a.test, extra_args: a.hurl_args })?;
+    let r = run::run(ws, &req, &run::RunOpts { env, asserts: a.test || cfg.run.asserts, extra_args: a.hurl_args })?;
     if let Some(p) = &a.export {
         let fmt = if p.extension().is_some_and(|e| e == "json") { Format::Json } else { Format::Md };
         std::fs::write(p, render_export(&r, fmt))?;
