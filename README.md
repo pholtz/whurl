@@ -77,6 +77,10 @@ Exit status: hurl's exit code when the run fails, 2 for whurl errors.
 a chained file · `x`/`X` export Markdown/JSON to `.whurl/exports/` · `o` open in `$EDITOR` ·
 `R` reload · `?` all keys.
 
+The sidebar is a folder tree that starts collapsed: `h/l` or `←→` close/open a folder (or jump to its
+parent), `space`/`enter` toggle it. Filtering opens every folder holding a match. Open folders and the
+last selection persist in `.whurl/state.toml`. `ui.sidebar = "flat"` shows the ranked flat list instead.
+
 The tab stays put as you move between requests; when a run you started finishes and the request
 is still selected, the view switches to Response. The summary shows the latency waterfall (dns, connect,
 tls, send, wait, download) and a sparkline of the last 30 runs in the current env; Meta adds

@@ -114,6 +114,13 @@ fn hint(s: &str) -> Line<'static> {
 }
 
 fn build_lines(app: &App, width: u16) -> Vec<Line<'static>> {
+    if let Some(crate::tui::tree::Row::Dir { path, count, .. }) = app.row() {
+        return vec![
+            Line::from(Span::styled(format!("{path}/"), Style::new().bold())),
+            Line::default(),
+            hint(&format!("{count} request(s) · enter/space toggles · ←→ close/open")),
+        ];
+    }
     let run = app.current_run();
     let entry = app.current_entry();
     let running = app.key().is_some_and(|k| app.running.contains_key(&k));

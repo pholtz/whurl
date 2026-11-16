@@ -64,7 +64,6 @@ impl Bind {
 }
 
 pub struct Command {
-    #[allow(dead_code)] // the `:` bar (phase 8) looks commands up by id
     pub id: &'static str,
     pub scope: Scope,
     pub keys: &'static [Bind],
@@ -73,7 +72,11 @@ pub struct Command {
 }
 
 impl Command {
+    /// Keyless commands are listed by name until the `:` bar (phase 8) can run them.
     pub fn key_labels(&self) -> String {
+        if self.keys.is_empty() {
+            return format!(":{}", self.id);
+        }
         self.keys.iter().map(Bind::label).collect::<Vec<_>>().join(" ")
     }
 }
@@ -112,6 +115,12 @@ pub static COMMANDS: &[Command] = &[
     cmd!("up", Sidebar, [k('k'), code(K::Up)], "previous request", |a| a.move_sel(-1)),
     cmd!("top", Sidebar, [k('g'), code(K::Home)], "first request", |a| a.move_sel(isize::MIN / 2)),
     cmd!("bottom", Sidebar, [k('G'), code(K::End)], "last request", |a| a.move_sel(isize::MAX / 2)),
+    cmd!("collapse", Sidebar, [k('h'), code(K::Left)], "close folder, else go to parent", |a| a.collapse()),
+    cmd!("expand", Sidebar, [k('l'), code(K::Right)], "open folder, else step in", |a| a.expand()),
+    cmd!("toggle-folder", Sidebar, [k(' ')], "open/close folder (enter too)", |a| a.toggle_dir()),
+    cmd!("expand-all", Sidebar, [], "open every folder", |a| a.expand_all()),
+    cmd!("collapse-all", Sidebar, [], "close every folder", |a| a.collapse_all()),
+    cmd!("sidebar", Sidebar, [], "switch sidebar: tree ↔ flat", |a| a.toggle_sidebar()),
     cmd!("scroll-down", Main, [k('j'), code(K::Down)], "scroll down", |a| a.scroll_by(1)),
     cmd!("scroll-up", Main, [k('k'), code(K::Up)], "scroll up", |a| a.scroll_by(-1)),
     cmd!("page-down", Main, [k(' '), code(K::PageDown)], "page down", |a| a.scroll_by(a.page())),

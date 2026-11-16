@@ -3,6 +3,8 @@
 mod app;
 mod commands;
 mod jobs;
+mod state;
+mod tree;
 mod views;
 
 use crate::config::Config;
@@ -71,18 +73,18 @@ fn on_key(app: &mut App, k: KeyEvent) {
             KeyCode::Esc => {
                 app.filter.clear();
                 app.mode = Mode::Normal;
-                app.refilter();
+                app.refilter(false);
             }
             KeyCode::Enter => app.mode = Mode::Normal,
             KeyCode::Backspace => {
                 app.filter.pop();
-                app.refilter();
+                app.refilter(true);
             }
             KeyCode::Down => app.move_sel(1),
             KeyCode::Up => app.move_sel(-1),
             KeyCode::Char(c) if !ctrl => {
                 app.filter.push(c);
-                app.refilter();
+                app.refilter(true);
             }
             _ => {}
         },

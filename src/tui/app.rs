@@ -6,9 +6,12 @@ use crate::store;
 use crate::workspace::{search, RequestFile, Workspace};
 use ratatui::text::Line;
 use ratatui::widgets::ListState;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use super::jobs::{Job, Msg, Outcome};
+use super::state::UiState;
+use super::tree::{self, Row, Sel};
+use crate::config::SidebarStyle;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Instant;
 
@@ -78,8 +81,14 @@ pub struct App {
     pub cfg: Config,
     pub requests: Vec<RequestFile>,
     pub filter: String,
-    pub visible: Vec<usize>,
+    /// Requests matching the filter, best first.
+    pub matched: Vec<usize>,
+    /// Sidebar rows; `list` selects one of these.
+    pub rows: Vec<Row>,
     pub list: ListState,
+    pub tree: bool,
+    /// Open folders in tree mode (ignored while filtering: every folder with a match is open).
+    pub expanded: HashSet<String>,
     pub envs: Vec<String>,
     pub env: usize,
     pub asserts: bool,
@@ -114,14 +123,18 @@ impl App {
         let envs = ws.envs();
         let env = envs.iter().position(|e| *e == env).unwrap_or(0);
         let (tx, rx) = channel();
+        let st = UiState::load(&ws);
         let mut app = App {
+            matched: vec![],
+            rows: vec![],
+            tree: cfg.ui.sidebar == SidebarStyle::Tree,
+            expanded: st.expanded.into_iter().collect(),
             ws,
             asserts: cfg.run.asserts,
             wrap: cfg.ui.wrap,
             cfg,
             requests,
             filter: query.unwrap_or_default(),
-            visible: vec![],
             list: ListState::default(),
             envs,
             env,
@@ -144,7 +157,10 @@ impl App {
             edit: None,
             quit: false,
         };
-        app.refilter();
+        app.matched = search(&app.requests, &app.filter);
+        let keep = if app.filter.is_empty() { st.selected.map(Sel::Req) } else { app.best() };
+        app.rebuild(keep, true);
+        app.on_select();
         Ok(app)
     }
 
@@ -154,8 +170,28 @@ impl App {
         self.envs.get(self.env).map(String::as_str).unwrap_or("local")
     }
 
+    pub fn row(&self) -> Option<&Row> {
+        self.list.selected().and_then(|i| self.rows.get(i))
+    }
+
+    /// The selected request; `None` when a folder is selected.
     pub fn current(&self) -> Option<&RequestFile> {
-        self.list.selected().and_then(|i| self.visible.get(i)).map(|&i| &self.requests[i])
+        match self.row()? {
+            Row::Req { idx, .. } => Some(&self.requests[*idx]),
+            Row::Dir { .. } => None,
+        }
+    }
+
+    fn sel(&self) -> Option<Sel> {
+        self.row().map(|r| r.sel(&self.requests))
+    }
+
+    fn best(&self) -> Option<Sel> {
+        self.matched.first().map(|&i| Sel::Req(self.requests[i].rel.clone()))
+    }
+
+    pub fn filtering(&self) -> bool {
+        !self.filter.is_empty()
     }
 
     pub fn key(&self) -> Option<Key> {
@@ -176,12 +212,51 @@ impl App {
 
     // ---- selection -----------------------------------------------------------------------
 
-    pub fn refilter(&mut self) {
-        let keep = self.current().map(|r| r.rel.clone());
-        self.visible = search(&self.requests, &self.filter);
-        let idx = keep.and_then(|k| self.visible.iter().position(|&i| self.requests[i].rel == k));
-        self.list.select(if self.visible.is_empty() { None } else { Some(idx.unwrap_or(0)) });
-        self.on_select();
+    /// Rebuild the rows and select `keep` if it is still there. `reveal` opens the folders
+    /// above a request that is hidden; otherwise the selection falls back to its nearest
+    /// visible folder.
+    fn rebuild(&mut self, keep: Option<Sel>, reveal: bool) {
+        if reveal && self.tree && !self.filtering() && let Some(Sel::Req(rel)) = &keep {
+            self.expanded.extend(tree::ancestors(rel).map(String::from));
+        }
+        self.rows = if self.tree {
+            tree::build(&self.requests, &self.matched, &self.expanded, self.filtering())
+        } else {
+            tree::flat(&self.matched)
+        };
+        let find = |s: &Sel| self.rows.iter().position(|r| r.sel(&self.requests) == *s);
+        let idx = keep.as_ref().and_then(|k| {
+            let path = match k {
+                Sel::Req(p) | Sel::Dir(p) => p.as_str(),
+            };
+            find(k).or_else(|| {
+                let mut dirs: Vec<&str> = tree::ancestors(path).collect();
+                dirs.reverse();
+                dirs.into_iter().find_map(|d| find(&Sel::Dir(d.into())))
+            })
+        });
+        self.list.select(if self.rows.is_empty() { None } else { Some(idx.unwrap_or(0)) });
+    }
+
+    /// Rebuild rows keeping the selection, and reset the view only if the selection changed.
+    fn rebuild_keep(&mut self, reveal: bool) {
+        let before = self.sel();
+        self.rebuild(before.clone(), reveal);
+        if self.sel() != before {
+            self.on_select();
+        }
+    }
+
+    /// Re-run the search. While typing, jump to the best match; otherwise keep the selection.
+    pub fn refilter(&mut self, best: bool) {
+        self.matched = search(&self.requests, &self.filter);
+        if best && self.filtering() {
+            let keep = self.best();
+            self.rebuild(keep, false);
+            self.on_select();
+        } else {
+            self.rebuild_keep(true);
+        }
     }
 
     pub fn reload(&mut self) {
@@ -190,7 +265,7 @@ impl App {
             Err(e) => self.say(format!("{e:#}"), true),
         }
         self.view = None;
-        self.refilter();
+        self.refilter(false);
     }
 
     /// Load the latest stored run for the selection (once) and reset the view.
@@ -207,10 +282,10 @@ impl App {
     }
 
     pub fn move_sel(&mut self, delta: isize) {
-        if self.visible.is_empty() {
+        if self.rows.is_empty() {
             return;
         }
-        let n = self.visible.len() as isize;
+        let n = self.rows.len() as isize;
         let cur = self.list.selected().unwrap_or(0) as isize;
         self.list.select(Some((cur + delta).clamp(0, n - 1) as usize));
         self.on_select();
@@ -287,7 +362,7 @@ impl App {
             self.say(format!("cancelled {}", self.current().map(|r| r.rel.as_str()).unwrap_or("")), false);
         } else if !self.filter.is_empty() {
             self.filter.clear();
-            self.refilter();
+            self.refilter(false);
         }
     }
 
@@ -297,6 +372,9 @@ impl App {
     }
 
     pub fn start_run(&mut self) {
+        if let Some(Row::Dir { .. }) = self.row() {
+            return self.toggle_dir();
+        }
         let Some(req) = self.current().cloned() else { return };
         let key = (req.rel.clone(), self.env().to_string());
         if self.running.contains_key(&key) {
@@ -346,8 +424,80 @@ impl App {
         }
     }
 
+    // ---- tree ----------------------------------------------------------------------------
+
+    fn set_open(&mut self, path: &str, open: bool) {
+        if self.filtering() {
+            return;
+        }
+        if open {
+            self.expanded.insert(path.to_string());
+        } else {
+            self.expanded.remove(path);
+        }
+        self.rebuild_keep(false);
+        self.save_state();
+    }
+
+    pub fn toggle_dir(&mut self) {
+        if let Some(Row::Dir { path, open, .. }) = self.row().cloned() {
+            self.set_open(&path, !open);
+        }
+    }
+
+    /// ← / h: close an open folder, else jump to the parent folder.
+    pub fn collapse(&mut self) {
+        let Some(row) = self.row().cloned() else { return };
+        let path = match &row {
+            Row::Dir { path, open: true, .. } if !self.filtering() => return self.set_open(path, false),
+            Row::Dir { path, .. } => path.clone(),
+            Row::Req { idx, .. } => self.requests[*idx].rel.clone(),
+        };
+        if let Some(p) = tree::parent(&path) {
+            let sel = Sel::Dir(p.to_string());
+            if let Some(i) = self.rows.iter().position(|r| r.sel(&self.requests) == sel) {
+                self.list.select(Some(i));
+                self.on_select();
+            }
+        }
+    }
+
+    /// → / l: open a closed folder, else step into it.
+    pub fn expand(&mut self) {
+        match self.row().cloned() {
+            Some(Row::Dir { path, open: false, .. }) if !self.filtering() => self.set_open(&path, true),
+            Some(Row::Dir { .. }) => self.move_sel(1),
+            _ => {}
+        }
+    }
+
+    pub fn expand_all(&mut self) {
+        self.expanded = self.requests.iter().flat_map(|r| tree::ancestors(&r.rel)).map(String::from).collect();
+        self.rebuild_keep(false);
+        self.save_state();
+    }
+
+    pub fn collapse_all(&mut self) {
+        self.expanded.clear();
+        self.rebuild_keep(false);
+        self.save_state();
+    }
+
+    pub fn toggle_sidebar(&mut self) {
+        self.tree = !self.tree;
+        self.rebuild_keep(true);
+        self.say(format!("sidebar: {}", if self.tree { "tree" } else { "flat" }), false);
+    }
+
+    fn save_state(&self) {
+        let mut expanded: Vec<String> = self.expanded.iter().cloned().collect();
+        expanded.sort();
+        UiState { expanded, selected: self.current().map(|r| r.rel.clone()) }.save(&self.ws);
+    }
+
     /// Kill every in-flight hurl before exiting.
     pub fn shutdown(&mut self) {
+        self.save_state();
         for (_, job) in self.running.drain() {
             job.shutdown();
         }

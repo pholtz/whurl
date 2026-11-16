@@ -75,7 +75,7 @@ fn draw_footer(app: &App, f: &mut Frame, area: Rect) {
         hints.push_span(Span::styled(k, Style::new().cyan()));
         hints.push_span(Span::styled(format!(" {v}"), Style::new().dark_gray()));
     }
-    let toast = app.flash.as_ref().filter(|(_, _, at)| at.elapsed() < Duration::from_secs(5));
+    let toast = app.flash.as_ref().filter(|(_, _, at)| at.elapsed() < Duration::from_secs(4));
     let Some((msg, err, _)) = toast else {
         f.render_widget(hints, area);
         return;
