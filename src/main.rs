@@ -1,0 +1,316 @@
+mod export;
+mod print;
+mod run;
+mod store;
+mod tui;
+mod workspace;
+
+use anyhow::Result;
+use clap::{Args, Parser, Subcommand, ValueEnum};
+use std::io::IsTerminal;
+use std::path::PathBuf;
+use workspace::Workspace;
+
+/// whurl ("with hurl"): run the hurl requests in a workspace of `.hurl` files, see the
+/// responses, and export runs for analysis.
+///
+/// Run with no command in a terminal to open the TUI.
+#[derive(Parser)]
+#[command(version)]
+struct Cli {
+    /// Workspace root (holds requests/ and env/). Defaults to the nearest ancestor of the
+    /// current directory that has both.
+    #[arg(long, global = true, env = "WHURL_WORKSPACE")]
+    workspace: Option<PathBuf>,
+
+    #[command(subcommand)]
+    cmd: Option<Cmd>,
+}
+
+#[derive(Subcommand)]
+enum Cmd {
+    /// Open the interactive TUI.
+    Tui {
+        /// Initial filter for the request list.
+        query: Option<String>,
+        #[command(flatten)]
+        env: EnvArg,
+    },
+    /// List requests in the workspace.
+    #[command(visible_alias = "ls")]
+    List {
+        /// Filter by name (fuzzy; space-separated terms must all match).
+        query: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Run a request file and show the response.
+    Run(RunArgs),
+    /// Show a stored run (default: the latest).
+    Show {
+        /// `last`, `last~N`, a run id or id prefix, or a request name (its latest run).
+        #[arg(default_value = "last")]
+        run: String,
+        #[command(flatten)]
+        out: OutArgs,
+    },
+    /// List past runs, newest first.
+    #[command(visible_alias = "log")]
+    History {
+        /// Only runs of requests matching this.
+        query: Option<String>,
+        #[arg(short = 'n', long, default_value_t = 20)]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Export a run (request, response, timings, hurl source) for agents or sharing.
+    Export {
+        #[arg(default_value = "last")]
+        run: String,
+        #[arg(short, long, value_enum, default_value_t = Format::Md)]
+        format: Format,
+        /// Write to this file instead of stdout.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// List environments and their non-secret variables.
+    Envs {
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Args)]
+struct EnvArg {
+    /// Environment: a file env/<ENV>.env.
+    #[arg(short, long, env = "HURL_ENV", default_value = "local")]
+    env: String,
+}
+
+#[derive(Args)]
+struct RunArgs {
+    /// A .hurl path or a fuzzy request name, e.g. `semantics/get_segment_size` or `seg size`.
+    target: String,
+    #[command(flatten)]
+    env: EnvArg,
+    /// Evaluate asserts (skipped by default).
+    #[arg(short = 't', long)]
+    test: bool,
+    #[command(flatten)]
+    out: OutArgs,
+    /// Also write the run to this file (.json for JSON, otherwise Markdown).
+    #[arg(short = 'x', long, value_name = "PATH")]
+    export: Option<PathBuf>,
+    /// Extra arguments passed to hurl, after `--`.
+    #[arg(last = true)]
+    hurl_args: Vec<String>,
+}
+
+#[derive(Args)]
+struct OutArgs {
+    /// Include request and response headers.
+    #[arg(short = 'i', long)]
+    headers: bool,
+    /// Print only the raw response body of the final request (for piping).
+    #[arg(short, long, conflicts_with_all = ["json", "md"])]
+    body: bool,
+    /// Print the full run as JSON.
+    #[arg(long, conflicts_with = "md")]
+    json: bool,
+    /// Print the full run as Markdown.
+    #[arg(long)]
+    md: bool,
+    /// Don't print the response body.
+    #[arg(long)]
+    no_body: bool,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum Format {
+    Md,
+    Json,
+}
+
+fn main() {
+    if let Err(e) = real_main() {
+        eprintln!("whurl: {e:#}");
+        std::process::exit(2);
+    }
+}
+
+fn real_main() -> Result<()> {
+    let cli = Cli::parse();
+    let ws = Workspace::discover(cli.workspace)?;
+    match cli.cmd {
+        None if std::io::stdout().is_terminal() => {
+            tui::run(ws, None, std::env::var("HURL_ENV").unwrap_or_else(|_| "local".into()))
+        }
+        None => {
+            use clap::CommandFactory;
+            Cli::command().print_help()?;
+            Ok(())
+        }
+        Some(Cmd::Tui { query, env }) => tui::run(ws, query, env.env),
+        Some(Cmd::List { query, json }) => list(&ws, &query.join(" "), json),
+        Some(Cmd::Run(args)) => run_cmd(&ws, args),
+        Some(Cmd::Show { run, out }) => {
+            let r = store::find(&ws, &run)?;
+            output(&ws, &r, &out)
+        }
+        Some(Cmd::History { query, limit, json }) => history(&ws, query.as_deref(), limit, json),
+        Some(Cmd::Export { run, format, output }) => {
+            let r = store::find(&ws, &run)?;
+            let text = render_export(&r, format);
+            match output {
+                Some(p) => {
+                    std::fs::write(&p, text)?;
+                    eprintln!("{}", p.display());
+                }
+                None => print!("{text}"),
+            }
+            Ok(())
+        }
+        Some(Cmd::Envs { json }) => envs(&ws, json),
+    }
+}
+
+fn list(ws: &Workspace, query: &str, json: bool) -> Result<()> {
+    let all = ws.requests()?;
+    let idx = workspace::search(&all, query);
+    if json {
+        let v: Vec<_> = idx
+            .iter()
+            .map(|&i| {
+                let r = &all[i];
+                serde_json::json!({
+                    "name": r.rel,
+                    "title": r.title,
+                    "path": r.path,
+                    "requests": r.entries.iter().map(|e| serde_json::json!({"method": e.method, "url": e.url, "line": e.line})).collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&v)?);
+        return Ok(());
+    }
+    let p = print::Paint::stdout();
+    let width = idx.iter().map(|&i| all[i].rel.len()).max().unwrap_or(0);
+    for &i in &idx {
+        let r = &all[i];
+        let (m, url) = r.primary().map(|e| (e.method.as_str(), e.url.as_str())).unwrap_or(("?", ""));
+        let more = if r.entries.len() > 1 { p.dim(&format!(" (+{})", r.entries.len() - 1)) } else { String::new() };
+        println!("{:<width$}  {:<6} {}{more}", r.rel, p.method(m), p.dim(url));
+    }
+    Ok(())
+}
+
+fn render_export(r: &run::Run, format: Format) -> String {
+    match format {
+        Format::Json => serde_json::to_string_pretty(r).unwrap_or_default() + "\n",
+        Format::Md => export::markdown(r, std::fs::read_to_string(&r.file).ok().as_deref()),
+    }
+}
+
+fn run_cmd(ws: &Workspace, a: RunArgs) -> Result<()> {
+    let req = ws.resolve(&a.target)?;
+    let env = a.env.env;
+    ws.vars_file(&env)?;
+    if !a.out.body && !a.out.json && !a.out.md && std::io::stderr().is_terminal() {
+        eprintln!("{}", print::Paint::stderr().dim(&format!("running {} [{env}]…", req.rel)));
+    }
+    let r = run::run(ws, &req, &run::RunOpts { env, asserts: a.test, extra_args: a.hurl_args })?;
+    if let Some(p) = &a.export {
+        let fmt = if p.extension().is_some_and(|e| e == "json") { Format::Json } else { Format::Md };
+        std::fs::write(p, render_export(&r, fmt))?;
+        eprintln!("{}", print::green(&format!("exported {}", p.display())));
+    }
+    output(ws, &r, &a.out)?;
+    if !r.success {
+        std::process::exit(r.exit_code.max(1));
+    }
+    Ok(())
+}
+
+fn output(_ws: &Workspace, r: &run::Run, out: &OutArgs) -> Result<()> {
+    if out.json {
+        print!("{}", render_export(r, Format::Json));
+    } else if out.md {
+        print!("{}", render_export(r, Format::Md));
+    } else if out.body {
+        if let Some(b) = r.primary().and_then(|e| e.response.as_ref()).and_then(|r| r.body.as_ref()) {
+            print!("{b}");
+        }
+        if !r.stderr.is_empty() {
+            eprintln!("{}", r.stderr);
+        }
+    } else {
+        print::run(r, &print::Show { headers: out.headers, body: !out.no_body });
+    }
+    Ok(())
+}
+
+fn history(ws: &Workspace, query: Option<&str>, limit: usize, json: bool) -> Result<()> {
+    let ids = match query {
+        Some(q) => store::ids_for(ws, &ws.resolve(q)?.rel, None),
+        None => store::ids(ws),
+    };
+    let runs: Vec<_> = ids.iter().take(limit).filter_map(|id| store::load(ws, id).ok()).collect();
+    if json {
+        let v: Vec<_> = runs
+            .iter()
+            .map(|r| {
+                let e = r.primary();
+                serde_json::json!({
+                    "id": r.id, "request": r.request, "env": r.env, "started_at": r.started_at,
+                    "success": r.success,
+                    "status": e.and_then(|e| e.response.as_ref()).map(|r| r.status),
+                    "latency_us": e.and_then(|e| e.total_us()),
+                    "size": e.and_then(|e| e.response.as_ref()).map(|r| r.size),
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&v)?);
+    } else {
+        let p = print::Paint::stdout();
+        for r in &runs {
+            println!("{}", print::history_line(p, r));
+        }
+    }
+    Ok(())
+}
+
+fn envs(ws: &Workspace, json: bool) -> Result<()> {
+    let p = print::Paint::stdout();
+    let mut all = serde_json::Map::new();
+    for env in ws.envs() {
+        let vars = ws.vars(&env);
+        let secret_names: Vec<String> = ws
+            .secrets_files(&env)
+            .iter()
+            .flat_map(|f| workspace::read_env(f))
+            .map(|(k, _)| k)
+            .collect();
+        if json {
+            all.insert(
+                env.clone(),
+                serde_json::json!({
+                    "vars": vars.iter().map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone()))).collect::<serde_json::Map<_, _>>(),
+                    "secrets": secret_names,
+                }),
+            );
+            continue;
+        }
+        println!("{}", p.bold(&env));
+        for (k, v) in &vars {
+            println!("  {} = {}", p.cyan(k), v);
+        }
+        if !secret_names.is_empty() {
+            println!("  {} {}", p.dim("secrets:"), p.dim(&secret_names.join(", ")));
+        }
+    }
+    if json {
+        println!("{}", serde_json::to_string_pretty(&all)?);
+    }
+    Ok(())
+}
