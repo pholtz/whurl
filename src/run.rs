@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::Instant;
 
 /// Response bodies larger than this are truncated in the stored record.
@@ -145,56 +145,95 @@ pub struct RunOpts {
     pub extra_args: Vec<String>,
 }
 
+/// Run hurl to completion and save the result.
 pub fn run(ws: &Workspace, req: &RequestFile, opts: &RunOpts) -> Result<Run> {
+    let mut p = spawn(ws, req, opts)?;
+    let status = p.child.wait().context("waiting for hurl")?;
+    p.finish(ws, status)
+}
+
+/// A hurl process in flight. The caller waits on (or kills) `child`, then calls `finish`.
+/// Dropping it without `finish` deletes the tempdir, env files included, and saves nothing.
+pub struct Pending {
+    pub child: Child,
+    tmp: tempfile::TempDir,
+    started_at: chrono::DateTime<chrono::Local>,
+    t0: Instant,
+    request: String,
+    file: PathBuf,
+    env: String,
+    asserts: bool,
+}
+
+pub fn spawn(ws: &Workspace, req: &RequestFile, opts: &RunOpts) -> Result<Pending> {
     let tmp = tempfile::tempdir()?;
-    let report_dir = tmp.path().join("report");
     let mut cmd = Command::new("hurl");
     let (vars, secrets) = env_files(ws, &opts.env, tmp.path())?;
     cmd.arg("--variables-file").arg(vars);
     if let Some(s) = secrets {
         cmd.arg("--secrets-file").arg(s);
     }
-    cmd.arg("--report-json").arg(&report_dir).arg("--no-output");
+    cmd.arg("--report-json").arg(tmp.path().join("report")).arg("--no-output");
     if !opts.asserts {
         cmd.arg("--no-assert");
     }
     cmd.args(&opts.extra_args).arg(&req.path);
     cmd.env("NO_COLOR", "1");
+    // stderr goes to a file rather than a pipe so a waiter that only polls can't deadlock on a
+    // full pipe buffer.
+    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(fs::File::create(tmp.path().join("stderr"))?);
 
     let started_at = chrono::Local::now();
     let t0 = Instant::now();
-    let out = cmd.output().context("running hurl (is it installed and on PATH?)")?;
-    let wall_ms = t0.elapsed().as_millis() as u64;
-    let redact = ws.redactor(&opts.env);
-    let stderr = redact.apply(strip_ansi(&String::from_utf8_lossy(&out.stderr)).trim_end());
-
-    let report_path = report_dir.join("report.json");
-    let report: Value = match fs::read_to_string(&report_path) {
-        Ok(s) => serde_json::from_str(&s).context("parsing hurl report")?,
-        Err(_) if !stderr.is_empty() => Value::Array(vec![]),
-        Err(e) => bail!("hurl wrote no report ({e})"),
-    };
-    let file_report = report.as_array().and_then(|a| a.first());
-    let entries = file_report
-        .and_then(|f| f["entries"].as_array())
-        .map(|es| es.iter().map(|e| parse_entry(e, &report_dir, &redact)).collect())
-        .unwrap_or_default();
-
-    let run = Run {
-        id: format!("{}_{}_{}", started_at.format("%Y%m%d-%H%M%S-%3f"), opts.env, req.rel.replace('/', "__")),
+    let child = cmd.spawn().context("running hurl (is it installed and on PATH?)")?;
+    Ok(Pending {
+        child,
+        tmp,
+        started_at,
+        t0,
         request: req.rel.clone(),
         file: req.path.clone(),
         env: opts.env.clone(),
         asserts: opts.asserts,
-        started_at: started_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, false),
-        wall_ms,
-        success: out.status.success(),
-        exit_code: out.status.code().unwrap_or(-1),
-        stderr,
-        entries,
-    };
-    crate::store::save(ws, &run)?;
-    Ok(run)
+    })
+}
+
+impl Pending {
+    /// Parse hurl's report into a redacted `Run` and save it.
+    pub fn finish(self, ws: &Workspace, status: ExitStatus) -> Result<Run> {
+        let wall_ms = self.t0.elapsed().as_millis() as u64;
+        let redact = ws.redactor(&self.env);
+        let raw_err = fs::read(self.tmp.path().join("stderr")).unwrap_or_default();
+        let stderr = redact.apply(strip_ansi(&String::from_utf8_lossy(&raw_err)).trim_end());
+
+        let report_dir = self.tmp.path().join("report");
+        let report: Value = match fs::read_to_string(report_dir.join("report.json")) {
+            Ok(s) => serde_json::from_str(&s).context("parsing hurl report")?,
+            Err(_) if !stderr.is_empty() => Value::Array(vec![]),
+            Err(e) => bail!("hurl wrote no report ({e})"),
+        };
+        let file_report = report.as_array().and_then(|a| a.first());
+        let entries = file_report
+            .and_then(|f| f["entries"].as_array())
+            .map(|es| es.iter().map(|e| parse_entry(e, &report_dir, &redact)).collect())
+            .unwrap_or_default();
+
+        let run = Run {
+            id: format!("{}_{}_{}", self.started_at.format("%Y%m%d-%H%M%S-%3f"), self.env, self.request.replace('/', "__")),
+            request: self.request,
+            file: self.file,
+            env: self.env,
+            asserts: self.asserts,
+            started_at: self.started_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, false),
+            wall_ms,
+            success: status.success(),
+            exit_code: status.code().unwrap_or(-1),
+            stderr,
+            entries,
+        };
+        crate::store::save(ws, &run)?;
+        Ok(run)
+    }
 }
 
 /// Write the variables and secrets files hurl actually gets into `dir`. hurl treats an empty

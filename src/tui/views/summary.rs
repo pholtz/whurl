@@ -38,11 +38,14 @@ pub fn draw(app: &App, f: &mut Frame, area: Rect) {
         Span::raw(url),
     ])];
     let run = app.current_run();
-    if let Some(t0) = app.running.get(&key) {
-        lines.push(Line::from(Span::styled(
-            format!("{} running… {:.1}s", SPINNER[app.tick % SPINNER.len()], t0.elapsed().as_secs_f32()),
-            Style::new().yellow(),
-        )));
+    if let Some(job) = app.running.get(&key) {
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{} running… {:.1}s", SPINNER[app.tick % SPINNER.len()], job.started.elapsed().as_secs_f32()),
+                Style::new().yellow(),
+            ),
+            Span::styled("  esc cancels", Style::new().dark_gray()),
+        ]));
     }
     match (run, entry) {
         (Some(run), Some(e)) => {

@@ -62,23 +62,44 @@ fn draw_top(app: &App, f: &mut Frame, area: Rect) {
     f.render_widget(Line::from(spans), area);
 }
 
+/// Key hints, then the latest toast after them. The toast only covers the hints when the
+/// terminal is too narrow to fit both, so nothing shifts.
 fn draw_footer(app: &App, f: &mut Frame, area: Rect) {
-    if let Some((msg, err, at)) = &app.flash
-        && at.elapsed() < Duration::from_secs(6)
-    {
-        let style = if *err { Style::new().red() } else { Style::new().green() };
-        f.render_widget(Span::styled(format!(" {msg}"), style), area);
-        return;
-    }
-    let mut spans = vec![Span::raw(" ")];
+    const MIN_TOAST: usize = 20;
+    let sep = || Span::styled(" · ", Style::new().dark_gray());
+    let mut hints = Line::from(Span::raw(" "));
     for (i, (k, v)) in [("enter", "run"), ("?", "help"), ("q", "quit")].into_iter().enumerate() {
         if i > 0 {
-            spans.push(Span::styled(" · ", Style::new().dark_gray()));
+            hints.push_span(sep());
         }
-        spans.push(Span::styled(k, Style::new().cyan()));
-        spans.push(Span::styled(format!(" {v}"), Style::new().dark_gray()));
+        hints.push_span(Span::styled(k, Style::new().cyan()));
+        hints.push_span(Span::styled(format!(" {v}"), Style::new().dark_gray()));
     }
-    f.render_widget(Line::from(spans), area);
+    let toast = app.flash.as_ref().filter(|(_, _, at)| at.elapsed() < Duration::from_secs(5));
+    let Some((msg, err, _)) = toast else {
+        f.render_widget(hints, area);
+        return;
+    };
+    let style = if *err { Style::new().red() } else { Style::new().green() };
+    let msg = msg.lines().next().unwrap_or_default();
+    let room = (area.width as usize).saturating_sub(hints.width() + 3);
+    let line = if room >= MIN_TOAST.min(msg.chars().count()) {
+        hints.push_span(sep());
+        hints.push_span(Span::styled(ellipsize(msg, room), style));
+        hints
+    } else {
+        Line::from(Span::styled(format!(" {}", ellipsize(msg, (area.width as usize).saturating_sub(1))), style))
+    };
+    f.render_widget(line, area);
+}
+
+fn ellipsize(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
+    out.push('…');
+    out
 }
 
 /// Placeholder until phase 6's plantmon-style modal; generated from the registry so it can't drift.

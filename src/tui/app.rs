@@ -1,13 +1,14 @@
 //! TUI state and the actions commands call.
 
 use crate::config::Config;
-use crate::run::{self, Entry, Run, RunOpts};
+use crate::run::{Entry, Run, RunOpts};
 use crate::store;
 use crate::workspace::{search, RequestFile, Workspace};
 use ratatui::text::Line;
 use ratatui::widgets::ListState;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use super::jobs::{Job, Msg, Outcome};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Instant;
 
@@ -92,9 +93,11 @@ pub struct App {
     /// Latest run per request/env; `None` means history was checked and is empty.
     pub runs: HashMap<Key, Option<Run>>,
     pub latencies: HashMap<Key, Vec<u64>>,
-    pub running: HashMap<Key, Instant>,
-    tx: Sender<(Key, Result<Run, String>)>,
-    pub rx: Receiver<(Key, Result<Run, String>)>,
+    /// In-flight runs; several may run at once, one per request/env.
+    pub running: HashMap<Key, Job>,
+    next_job: u64,
+    tx: Sender<Msg>,
+    pub rx: Receiver<Msg>,
     pub flash: Option<(String, bool, Instant)>,
     pub tick: usize,
     pub view: Option<View>,
@@ -130,6 +133,7 @@ impl App {
             runs: HashMap::new(),
             latencies: HashMap::new(),
             running: HashMap::new(),
+            next_job: 0,
             tx,
             rx,
             flash: None,
@@ -275,9 +279,13 @@ impl App {
         self.mode = Mode::Filter;
     }
 
-    /// Esc with no overlay open. (Phase 4: cancels the selected request's in-flight run.)
+    /// Esc with no overlay open: cancel the selected request's run, else clear the filter.
     pub fn escape(&mut self) {
-        if !self.filter.is_empty() {
+        if let Some(job) = self.key().and_then(|k| self.running.remove(&k)) {
+            job.cancel();
+            self.view = None;
+            self.say(format!("cancelled {}", self.current().map(|r| r.rel.as_str()).unwrap_or("")), false);
+        } else if !self.filter.is_empty() {
             self.filter.clear();
             self.refilter();
         }
@@ -292,24 +300,26 @@ impl App {
         let Some(req) = self.current().cloned() else { return };
         let key = (req.rel.clone(), self.env().to_string());
         if self.running.contains_key(&key) {
-            return;
+            return self.say("already running · esc cancels", false);
         }
         let opts = RunOpts { env: key.1.clone(), asserts: self.asserts, extra_args: vec![] };
-        let root = self.ws.root.clone();
-        let tx = self.tx.clone();
-        self.running.insert(key.clone(), Instant::now());
-        std::thread::spawn(move || {
-            let ws = Workspace { root };
-            let res = run::run(&ws, &req, &opts).map_err(|e| format!("{e:#}"));
-            let _ = tx.send((key, res));
-        });
+        self.next_job += 1;
+        let job = Job::start(self.next_job, key.clone(), &self.ws, req, opts, self.tx.clone());
+        self.running.insert(key, job);
+        self.view = None;
     }
 
-    pub fn on_result(&mut self, key: Key, res: Result<Run, String>) {
+    pub fn on_msg(&mut self, msg: Msg) {
+        let Msg { id, key, outcome } = msg;
+        // A cancelled job's message, or one superseded by a newer run of the same key.
+        if self.running.get(&key).map(|j| j.id) != Some(id) {
+            return;
+        }
         self.running.remove(&key);
+        self.view = None;
         let selected = self.key().as_ref() == Some(&key);
-        match res {
-            Ok(r) => {
+        match outcome {
+            Outcome::Done(r) => {
                 let summary = summary_text(&r);
                 if let Some(us) = r.primary().and_then(Entry::total_us) {
                     let l = self.latencies.entry(key.clone()).or_default();
@@ -327,12 +337,19 @@ impl App {
                     }
                 }
                 self.runs.insert(key.clone(), Some(r));
-                self.view = None;
                 if !selected || !ok {
                     self.say(format!("{} [{}]: {summary}", key.0, key.1), !ok);
                 }
             }
-            Err(e) => self.say(format!("{}: {e}", key.0), true),
+            Outcome::Failed(e) => self.say(format!("{}: {e}", key.0), true),
+            Outcome::Cancelled => {}
+        }
+    }
+
+    /// Kill every in-flight hurl before exiting.
+    pub fn shutdown(&mut self) {
+        for (_, job) in self.running.drain() {
+            job.shutdown();
         }
     }
 

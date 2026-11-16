@@ -89,7 +89,7 @@ macro_rules! cmd {
 
 pub static COMMANDS: &[Command] = &[
     cmd!("run", Global, [code(K::Enter), k('r')], "run the selected request", |a| a.start_run()),
-    cmd!("escape", Global, [code(K::Esc)], "close overlay / clear filter", |a| a.escape()),
+    cmd!("escape", Global, [code(K::Esc)], "cancel the selected run, else clear the filter", |a| a.escape()),
     cmd!("focus", Global, [code(K::Tab), code(K::BackTab)], "switch focus: sidebar ↔ main", |a| a.toggle_focus()),
     cmd!("filter", Global, [k('/')], "filter requests", |a| a.open_filter()),
     cmd!("env-next", Global, [k('e')], "next env", |a| a.cycle_env(1)),
