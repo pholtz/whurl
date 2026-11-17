@@ -1,9 +1,11 @@
 //! Interactive view: pick a request, fire it, inspect the response.
 
 mod app;
+mod cmdline;
 mod commands;
 mod help;
 mod jobs;
+mod settings;
 mod state;
 mod tree;
 mod views;
@@ -70,6 +72,35 @@ fn on_key(app: &mut App, k: KeyEvent) {
     }
     match app.mode {
         Mode::Help => help::on_key(app, &k),
+        Mode::Command => match k.code {
+            KeyCode::Esc => app.mode = Mode::Normal,
+            KeyCode::Enter => cmdline::submit(app),
+            KeyCode::Tab => cmdline::accept(app),
+            KeyCode::Down | KeyCode::BackTab => cmdline::move_sel(app, 1),
+            KeyCode::Up => cmdline::move_sel(app, -1),
+            KeyCode::Char('n' | 'j') if ctrl => cmdline::move_sel(app, 1),
+            KeyCode::Char('p' | 'k') if ctrl => cmdline::move_sel(app, -1),
+            KeyCode::Backspace if app.cmdline.input.is_empty() => app.mode = Mode::Normal,
+            KeyCode::Backspace => {
+                app.cmdline.input.pop();
+                cmdline::edited(app);
+            }
+            KeyCode::Char('u') if ctrl => {
+                app.cmdline.input.clear();
+                cmdline::edited(app);
+            }
+            KeyCode::Char('w') if ctrl => {
+                let s = app.cmdline.input.trim_end();
+                let keep = s.rfind(char::is_whitespace).map_or(0, |i| i + 1);
+                app.cmdline.input.truncate(keep);
+                cmdline::edited(app);
+            }
+            KeyCode::Char(c) if !ctrl => {
+                app.cmdline.input.push(c);
+                cmdline::edited(app);
+            }
+            _ => {}
+        },
         Mode::Picker => match k.code {
             KeyCode::Esc => app.mode = Mode::Normal,
             KeyCode::Enter => app.picker_choose(),

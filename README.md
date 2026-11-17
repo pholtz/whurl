@@ -87,6 +87,13 @@ last selection persist in `.whurl/state.toml`. `ui.sidebar = "flat"` shows the r
 `"hidden"` gives the main pane the full width. `\` hides/shows the sidebar for the session, and
 `ctrl-p` (or `/` with the sidebar hidden) opens a fuzzy picker over all requests.
 
+`:` opens a command bar on the statusbar line. It runs any command from `?` by name (`:expand-all`,
+`:q`) plus a few that take arguments: `:env <name>`, `:tab <name>`, `:export md|json`,
+`:sidebar tree|flat|hidden`, `:asserts`/`:wrap on|off`, `:cancel [all]`. `:set <key> [value]` changes a
+setting for the session; `:set! <key> [value]` also saves it to the config file (with no value it saves
+the current one, so `\` then `:set! ui.sidebar` keeps the sidebar). `tab` completes, `↑↓` choose, and
+`enter` takes the highlighted completion when the word is unfinished.
+
 The tab stays put as you move between requests; when a run you started finishes and the request
 is still selected, the view switches to Response. The summary shows the latency waterfall (dns, connect,
 tls, send, wait, download) and a sparkline of the last 30 runs in the current env; Meta adds

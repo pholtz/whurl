@@ -10,6 +10,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use super::jobs::{Job, Msg, Outcome};
 use super::help::Help;
+use super::cmdline::CmdLine;
 use super::state::UiState;
 use super::tree::{self, Row, Sel};
 use crate::config::SidebarStyle;
@@ -45,6 +46,7 @@ pub enum Mode {
     Filter,
     Help,
     Picker,
+    Command,
 }
 
 /// Which pane movement keys act on.
@@ -100,6 +102,7 @@ pub struct App {
     pub tree: bool,
     pub show_sidebar: bool,
     pub picker: Picker,
+    pub cmdline: CmdLine,
     /// Open folders in tree mode (ignored while filtering: every folder with a match is open).
     pub expanded: HashSet<String>,
     pub envs: Vec<String>,
@@ -145,6 +148,7 @@ impl App {
             tree: cfg.ui.sidebar != SidebarStyle::Flat,
             show_sidebar: cfg.ui.sidebar != SidebarStyle::Hidden,
             picker: Picker::default(),
+            cmdline: CmdLine::default(),
             expanded: st.expanded.into_iter().collect(),
             ws,
             asserts: cfg.run.asserts,

@@ -1,5 +1,5 @@
-//! The command registry: one table drives key dispatch and the help modal (later: the `:` bar
-//! and statusbar hints). Add a command here and it is bound, documented, and runnable.
+//! The command registry: one table drives key dispatch, the help modal, and the `:` bar. Add a
+//! command here and it is bound, documented, and runnable.
 
 use super::app::{App, Focus, Tab};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -72,7 +72,7 @@ pub struct Command {
 }
 
 impl Command {
-    /// Keyless commands are listed by name until the `:` bar (phase 8) can run them.
+    /// Keyless commands are listed by name: the `:` bar runs them.
     pub fn key_labels(&self) -> String {
         if self.keys.is_empty() {
             return format!(":{}", self.id);
@@ -111,6 +111,7 @@ pub static COMMANDS: &[Command] = &[
     cmd!("export-json", Global, [k('X')], "export run as JSON to .whurl/exports", |a| a.export(true)),
     cmd!("edit", Global, [k('o')], "open the .hurl file in $EDITOR", |a| a.edit_current()),
     cmd!("reload", Global, [k('R')], "reload request files", |a| a.reload_requests()),
+    cmd!("command", Global, [k(':')], "command bar: any command by name, plus env, set, export…", super::cmdline::open),
     cmd!("help", Global, [k('?')], "this help, and the Config tab", super::help::open),
     cmd!("quit", Global, [k('q'), ctrl('c')], "quit", |a| a.quit = true),
     cmd!("down", Sidebar, [k('j'), code(K::Down)], "next request", |a| a.move_sel(1)),

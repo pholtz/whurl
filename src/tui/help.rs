@@ -3,7 +3,7 @@
 
 use super::app::{App, Mode};
 use super::commands::COMMANDS;
-use crate::config::{self, Config, Sections, SidebarStyle, REQUEST_SECTIONS, RESPONSE_SECTIONS};
+use crate::config::{Config, Sections, SidebarStyle, REQUEST_SECTIONS, RESPONSE_SECTIONS};
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -45,13 +45,6 @@ impl Group {
         match self {
             Group::Request => &cfg.request,
             Group::Response => &cfg.response,
-        }
-    }
-
-    fn sections_mut(self, cfg: &mut Config) -> &mut Sections {
-        match self {
-            Group::Request => &mut cfg.request,
-            Group::Response => &mut cfg.response,
         }
     }
 
@@ -214,65 +207,51 @@ fn set(old: bool, c: Change) -> bool {
     }
 }
 
+/// Cycle `cur` through `opts`: left goes back, right/enter forward.
+fn cycle<T: PartialEq + Clone>(opts: &[T], cur: &T, c: Change) -> T {
+    let i = opts.iter().position(|o| o == cur).unwrap_or(0) as isize;
+    let delta = if matches!(c, Change::Off) { -1 } else { 1 };
+    opts[(i + delta).rem_euclid(opts.len() as isize) as usize].clone()
+}
+
 fn change(app: &mut App, s: &Setting, c: Change) {
-    match s {
-        Setting::Sidebar => {
-            let all = SidebarStyle::ALL;
-            let cur = all.iter().position(|s| *s == app.cfg.ui.sidebar).unwrap_or(0) as isize;
-            let delta = if matches!(c, Change::Off) { -1 } else { 1 };
-            let next = all[(cur + delta).rem_euclid(all.len() as isize) as usize];
-            app.cfg.ui.sidebar = next;
-            app.apply_sidebar_style();
-            save(app, "ui", "sidebar", Some(next.name().into()));
-        }
-        Setting::Wrap => {
-            let v = set(app.cfg.ui.wrap, c);
-            app.cfg.ui.wrap = v;
-            app.wrap = v;
-            app.scroll.1 = 0;
-            save(app, "ui", "wrap", Some(v.into()));
-        }
-        Setting::AutoSwitch => {
-            let v = set(app.cfg.ui.auto_switch_response, c);
-            app.cfg.ui.auto_switch_response = v;
-            save(app, "ui", "auto_switch_response", Some(v.into()));
-        }
-        Setting::Asserts => {
-            let v = set(app.cfg.run.asserts, c);
-            app.cfg.run.asserts = v;
-            app.asserts = v;
-            save(app, "run", "asserts", Some(v.into()));
-        }
+    let on_off = |v: bool| if v { "on" } else { "off" }.to_string();
+    let cfg = &app.cfg;
+    let (key, value) = match s {
+        Setting::Sidebar => ("ui.sidebar", cycle(&SidebarStyle::ALL, &cfg.ui.sidebar, c).name().to_string()),
+        Setting::Wrap => ("ui.wrap", on_off(set(cfg.ui.wrap, c))),
+        Setting::AutoSwitch => ("ui.auto_switch_response", on_off(set(cfg.ui.auto_switch_response, c))),
+        Setting::Asserts => ("run.asserts", on_off(set(cfg.run.asserts, c))),
         Setting::DefaultEnv => {
-            // Cycle through "unset" and every env in the workspace.
             let mut opts: Vec<Option<String>> = vec![None];
             opts.extend(app.envs.iter().cloned().map(Some));
-            let cur = opts.iter().position(|o| *o == app.cfg.run.default_env).unwrap_or(0) as isize;
-            let delta = if matches!(c, Change::Off) { -1 } else { 1 };
-            let next = opts[(cur + delta).rem_euclid(opts.len() as isize) as usize].clone();
-            save(app, "run", "default_env", next.as_deref().map(Into::into));
-            app.cfg.run.default_env = next;
+            ("run.default_env", cycle(&opts, &cfg.run.default_env, c).unwrap_or_else(|| "unset".into()))
         }
         Setting::Section(g, name) => {
-            let on = g.enabled(&app.cfg).contains(name);
+            let on = g.enabled(cfg).contains(name);
             let want = set(on, c);
             if want == on {
                 return;
             }
             // Keep the displayed order, flipping just this one.
             let list: Vec<&str> =
-                g.order(&app.cfg).into_iter().filter(|s| if s == name { want } else { g.enabled(&app.cfg).contains(s) }).collect();
+                g.order(cfg).into_iter().filter(|s| if s == name { want } else { g.enabled(cfg).contains(s) }).collect();
             write_sections(app, *g, list);
             // Rows are enabled-then-hidden, so the selection follows the moved row.
             let rows = settings(&app.cfg);
             app.help.cfg = rows.iter().position(|r| r == s).unwrap_or(app.help.cfg);
+            return;
         }
         Setting::OpenFile => {
             if matches!(c, Change::Flip) {
                 app.mode = Mode::Normal;
                 app.edit = Config::path();
             }
+            return;
         }
+    };
+    if let Err(e) = super::settings::set(app, key, Some(&value), true) {
+        app.say(e, true);
     }
 }
 
@@ -292,15 +271,8 @@ fn reorder(app: &mut App, s: &Setting, delta: isize) {
 }
 
 fn write_sections(app: &mut App, g: Group, list: Vec<&str>) {
-    g.sections_mut(&mut app.cfg).sections = Some(list.iter().map(|s| s.to_string()).collect());
-    app.view = None;
-    save(app, g.table(), "sections", Some(toml_edit::Array::from_iter(list).into()));
-}
-
-fn save(app: &mut App, table: &str, key: &str, value: Option<toml_edit::Value>) {
-    let shown = value.as_ref().map(|v| v.to_string().trim().to_string()).unwrap_or_else(|| "unset".into());
-    match config::save_key(table, key, value) {
-        Ok(_) => app.say(format!("saved {table}.{key} = {shown}"), false),
-        Err(e) => app.say(format!("config not saved: {e:#}"), true),
+    let key = format!("{}.sections", g.table());
+    if let Err(e) = super::settings::set(app, &key, Some(&list.join(",")), true) {
+        app.say(e, true);
     }
 }

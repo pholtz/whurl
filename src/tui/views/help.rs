@@ -64,7 +64,7 @@ fn commands(app: &App, f: &mut Frame, area: Rect) {
     let table_area = frame(
         f,
         area,
-        "Keys act on the focused pane first (tab switches focus), then anywhere. Pick a row and press enter to run it.",
+        "Keys act on the focused pane first (tab switches focus), then anywhere. Pick a row and press enter to run it. `:` runs any of these by name, plus env, set, set!, export, tab and cancel, which take arguments.",
         "",
         "tab pages · ↑↓ choose · enter run · ? / esc close",
     );

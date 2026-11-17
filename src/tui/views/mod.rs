@@ -1,5 +1,6 @@
 //! Rendering. Views read `App` and never change selection or run state.
 
+mod cmdline;
 mod content;
 mod help;
 mod picker;
@@ -33,6 +34,7 @@ pub fn draw(app: &mut App, f: &mut Frame) {
     match app.mode {
         Mode::Help => help::draw(app, f),
         Mode::Picker => picker::draw(app, f),
+        Mode::Command => cmdline::draw_list(app, f, foot),
         _ => {}
     }
 }
@@ -76,9 +78,9 @@ fn draw_footer(app: &App, f: &mut Frame, area: Rect) {
     let sep = || Span::styled(" · ", Style::new().dark_gray());
     let mut hints = Line::from(Span::raw(" "));
     let keys: &[(&str, &str)] = if app.show_sidebar {
-        &[("enter", "run"), ("?", "help"), ("q", "quit")]
+        &[("enter", "run"), (":", "command"), ("?", "help"), ("q", "quit")]
     } else {
-        &[("enter", "run"), ("/", "find"), ("?", "help"), ("q", "quit")]
+        &[("enter", "run"), ("/", "find"), (":", "command"), ("?", "help"), ("q", "quit")]
     };
     for (i, &(k, v)) in keys.iter().enumerate() {
         if i > 0 {
@@ -89,6 +91,11 @@ fn draw_footer(app: &App, f: &mut Frame, area: Rect) {
     }
     let state = state_line(app);
     let state_w = state.width() + 1;
+    if app.mode == Mode::Command {
+        let [l, r] = Layout::horizontal([Constraint::Min(0), Constraint::Length(state_w as u16)]).areas(area);
+        f.render_widget(cmdline::input(app), l);
+        return f.render_widget(state, r);
+    }
     let toast = app.flash.as_ref().filter(|(_, _, at)| at.elapsed() < Duration::from_secs(4));
     let left = match toast {
         None => hints,
