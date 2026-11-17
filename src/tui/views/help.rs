@@ -5,11 +5,11 @@ use super::theme::{centered, panel, ACCENT};
 use crate::config::Config;
 use crate::tui::app::App;
 use crate::tui::commands::COMMANDS;
-use crate::tui::help::{describe, settings, HelpTab};
+use crate::tui::help::{describe, matches, settings, HelpTab};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Cell, Clear, Paragraph, Row, Table, TableState, Tabs, Wrap};
 
 pub fn draw(app: &App, f: &mut Frame) {
@@ -60,15 +60,45 @@ fn frame(f: &mut Frame, area: Rect, summary: &str, desc: &str, hint: &str) -> Re
 }
 
 fn commands(app: &App, f: &mut Frame, area: Rect) {
-    let sel = app.help.cmd.min(COMMANDS.len().saturating_sub(1));
+    let h = &app.help;
+    let found = matches(&h.query);
+    let sel = h.cmd.min(found.len().saturating_sub(1));
+    let searching = h.typing || !h.query.is_empty();
+    let hint = if h.typing {
+        "type to search keys and descriptions · ↑↓ choose · enter run · esc clear"
+    } else if searching {
+        "/ edit search · ↑↓ choose · enter run · esc clear"
+    } else {
+        "/ search · tab pages · ↑↓ choose · enter run · ? / esc close"
+    };
     let table_area = frame(
         f,
         area,
         "Keys act on the focused pane first (tab switches focus), then anywhere. Pick a row and press enter to run it. `:` runs any of these by name, plus env, set, set!, export, tab and cancel, which take arguments.",
         "",
-        "tab pages · ↑↓ choose · enter run · ? / esc close",
+        hint,
     );
-    let rows = COMMANDS.iter().map(|c| {
+    // The search line takes the table's first row, so the list doesn't jump as it opens.
+    let table_area = if searching {
+        let [search, rest] = Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).areas(table_area);
+        f.render_widget(
+            Line::from(vec![
+                Span::styled("/", Style::new().fg(ACCENT).bold()),
+                Span::raw(h.query.clone()),
+                Span::styled(if h.typing { "▏" } else { "" }, Style::new().fg(ACCENT)),
+            ]),
+            search,
+        );
+        rest
+    } else {
+        table_area
+    };
+    let count = match (searching, found.len()) {
+        (false, n) => format!("Command · {} of {n}", sel + 1),
+        (true, 0) => "Command · no matches".into(),
+        (true, n) => format!("Command · {} of {n} matching (of {})", sel + 1, COMMANDS.len()),
+    };
+    let rows = found.iter().map(|c| {
         Row::new([
             Cell::from(c.key_labels()).style(Style::new().fg(ACCENT)),
             Cell::from(c.desc),
@@ -77,14 +107,16 @@ fn commands(app: &App, f: &mut Frame, area: Rect) {
     });
     let table = Table::new(rows, [Constraint::Length(16), Constraint::Min(10), Constraint::Length(10)])
         .header(
-            Row::new(["Key".to_string(), format!("Command · {} of {}", sel + 1, COMMANDS.len()), "Where".into()])
+            Row::new(["Key".to_string(), count, "Where".into()])
                 .style(Style::new().dark_gray())
                 .bottom_margin(1),
         )
         .column_spacing(2)
         .highlight_symbol("› ")
+        .highlight_spacing(ratatui::widgets::HighlightSpacing::Always)
         .row_highlight_style(highlight());
-    f.render_stateful_widget(table, table_area, &mut TableState::default().with_selected(Some(sel)));
+    let selected = (!found.is_empty()).then_some(sel);
+    f.render_stateful_widget(table, table_area, &mut TableState::default().with_selected(selected));
 }
 
 fn config(app: &App, f: &mut Frame, area: Rect) {

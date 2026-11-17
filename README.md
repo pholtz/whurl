@@ -83,7 +83,7 @@ page), `g`/`G` or `home`/`end` act on the focused one (main also: `space` page, 
 `e`/`E` env · `t` asserts · `1-4` Request, Response, Meta, Source · `w` wrap · `[ ]` entries in
 a chained file · `x`/`X` export Markdown/JSON to `.whurl/exports/` · `v` view the body in a viewer · `y` copy it to the clipboard · `o` open in `$EDITOR` ·
 `a` new request · `d` duplicate · `m` rename · `D` delete · `C` clear history · `<`/`>`/`=` sidebar width ·
-`R` reload · `?` all keys (enter runs the selected one) and the Config tab.
+`R` reload · `?` all keys (enter runs the selected one; `/` searches keys and descriptions) and the Config tab.
 The statusbar shows key hints and messages on the left; workspace, asserts, and the env on the right.
 
 The sidebar is a folder tree that starts collapsed: `h/l` or `←→` close/open a folder (or jump to its

@@ -4,7 +4,8 @@
 use super::app::{App, Mode};
 use super::commands::COMMANDS;
 use crate::config::{Config, Sections, SidebarStyle, REQUEST_SECTIONS, RESPONSE_SECTIONS};
-use ratatui::crossterm::event::{KeyCode, KeyEvent};
+use super::commands::Command;
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum HelpTab {
@@ -16,8 +17,39 @@ pub enum HelpTab {
 #[derive(Default)]
 pub struct Help {
     pub tab: HelpTab,
+    /// Selection within `matches`.
     pub cmd: usize,
     pub cfg: usize,
+    /// Narrows the Commands tab; `typing` while `/` is taking keys.
+    pub query: String,
+    pub typing: bool,
+}
+
+/// Commands matching the query: every word must appear in the keys, name, description, or pane.
+/// A command bound to exactly what was typed (`y`, `ctrl-d`) comes first, then name or key
+/// prefixes, then the rest in registry order.
+pub fn matches(query: &str) -> Vec<&'static Command> {
+    let q = query.trim().to_lowercase();
+    if q.is_empty() {
+        return COMMANDS.iter().collect();
+    }
+    let rank = |c: &Command| {
+        let keys = c.key_labels().to_lowercase();
+        let hay = format!("{keys} {} {} {}", c.id, c.desc.to_lowercase(), c.scope.title().to_lowercase());
+        if !q.split_whitespace().all(|w| hay.contains(w)) {
+            return None;
+        }
+        Some(if keys.split(' ').any(|k| k == q || k == format!(":{q}")) || c.id == q {
+            0
+        } else if c.id.starts_with(&q) || keys.split(' ').any(|k| k.starts_with(&q)) {
+            1
+        } else {
+            2
+        })
+    };
+    let mut out: Vec<(u8, &Command)> = COMMANDS.iter().filter_map(|c| rank(c).map(|r| (r, c))).collect();
+    out.sort_by_key(|(r, _)| *r);
+    out.into_iter().map(|(_, c)| c).collect()
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -146,12 +178,48 @@ enum Change {
 }
 
 pub fn open(app: &mut App) {
+    app.help.query.clear();
+    app.help.typing = false;
     app.mode = Mode::Help;
+}
+
+/// Keys while `/` is typing a query: text goes in, arrows still move, enter runs the pick.
+fn on_search_key(app: &mut App, k: &KeyEvent) -> bool {
+    let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+    let h = &mut app.help;
+    match k.code {
+        KeyCode::Char('u') if ctrl => h.query.clear(),
+        KeyCode::Char(c) if !ctrl => h.query.push(c),
+        KeyCode::Backspace if h.query.is_empty() => h.typing = false,
+        KeyCode::Backspace => {
+            h.query.pop();
+        }
+        _ => return false,
+    }
+    h.cmd = 0;
+    true
 }
 
 /// Keys while the modal is open.
 pub fn on_key(app: &mut App, k: &KeyEvent) {
+    let searching = app.help.tab == HelpTab::Commands;
+    if searching && app.help.typing && on_search_key(app, k) {
+        return;
+    }
+    let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
     match k.code {
+        // Esc first drops the search, then closes.
+        KeyCode::Esc if searching && (app.help.typing || !app.help.query.is_empty()) => {
+            app.help.query.clear();
+            app.help.typing = false;
+            return;
+        }
+        KeyCode::Char('/') if searching => {
+            app.help.typing = true;
+            return;
+        }
+        KeyCode::Char('n' | 'j') if ctrl && searching => return app.help.cmd = (app.help.cmd + 1).min(matches(&app.help.query).len().saturating_sub(1)),
+        KeyCode::Char('p' | 'k') if ctrl && searching => return app.help.cmd = app.help.cmd.saturating_sub(1),
         KeyCode::Esc | KeyCode::Char('?' | 'q') => return app.mode = Mode::Normal,
         KeyCode::Tab | KeyCode::BackTab => {
             app.help.tab = match app.help.tab {
@@ -163,7 +231,7 @@ pub fn on_key(app: &mut App, k: &KeyEvent) {
         _ => {}
     }
     let len = match app.help.tab {
-        HelpTab::Commands => COMMANDS.len(),
+        HelpTab::Commands => matches(&app.help.query).len(),
         HelpTab::Config => settings(&app.cfg).len(),
     };
     let sel = match app.help.tab {
@@ -184,7 +252,7 @@ pub fn on_key(app: &mut App, k: &KeyEvent) {
         HelpTab::Commands => match k.code {
             KeyCode::Left | KeyCode::Right => app.help.tab = HelpTab::Config,
             KeyCode::Enter => {
-                if let Some(c) = COMMANDS.get(app.help.cmd) {
+                if let Some(c) = matches(&app.help.query).get(app.help.cmd) {
                     app.mode = Mode::Normal;
                     (c.run)(app);
                 }
