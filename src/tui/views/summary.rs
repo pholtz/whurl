@@ -29,10 +29,23 @@ pub fn draw(app: &App, f: &mut Frame, area: Rect) {
         Span::styled(req.rel.clone(), Style::new().bold()),
         Span::styled(req.title.as_ref().map(|t| format!("  {t} ")).unwrap_or(" ".into()), Style::new().dark_gray()),
     ]);
-    let block = panel(false).padding(Padding::horizontal(1)).title(title);
+    let key = app.key().unwrap_or_default();
+    let mut block = panel(false).padding(Padding::horizontal(1)).title(title);
+    // On the border, so a run starting or ending never moves the lines below.
+    if let Some(job) = app.running.get(&key) {
+        block = block.title_top(
+            Line::from(vec![
+                Span::styled(
+                    format!(" {} running {:.1}s", SPINNER[app.tick % SPINNER.len()], job.started.elapsed().as_secs_f32()),
+                    Style::new().yellow(),
+                ),
+                Span::styled(" · esc to cancel ", Style::new().dark_gray()),
+            ])
+            .right_aligned(),
+        );
+    }
     let inner = block.inner(area);
     f.render_widget(block, area);
-    let key = app.key().unwrap_or_default();
     let lat = app.latencies.get(&key).cloned().unwrap_or_default();
     let spark_w = if lat.len() > 1 && inner.width > 70 { 32 } else { 0 };
     let [left, spark] = Layout::horizontal([Constraint::Min(0), Constraint::Length(spark_w)]).areas(inner);
@@ -42,15 +55,6 @@ pub fn draw(app: &App, f: &mut Frame, area: Rect) {
         Span::raw(url),
     ])];
     let run = app.current_run();
-    if let Some(job) = app.running.get(&key) {
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("{} running… {:.1}s", SPINNER[app.tick % SPINNER.len()], job.started.elapsed().as_secs_f32()),
-                Style::new().yellow(),
-            ),
-            Span::styled("  esc cancels", Style::new().dark_gray()),
-        ]));
-    }
     match (run, entry) {
         (Some(run), Some(e)) => {
             let mut status = vec![];

@@ -76,6 +76,17 @@ fn event_loop(app: &mut App, term: &mut DefaultTerminal) -> Result<()> {
             if let Err(e) = suspend(term, &editor, &path) {
                 app.say(format!("editor: {e}"), true);
             }
+            // A new request left empty was abandoned.
+            if app.created.take().as_ref() == Some(&path)
+                && std::fs::read_to_string(&path).is_ok_and(|s| s.trim().is_empty())
+                && std::fs::remove_file(&path).is_ok()
+            {
+                let top = app.ws.requests_dir();
+                for d in path.ancestors().skip(1).take_while(|d| d.starts_with(&top) && *d != top) {
+                    let _ = std::fs::remove_dir(d); // only if the new request left it empty
+                }
+                app.say("empty request discarded", false);
+            }
             if Some(&path) == crate::config::Config::path().as_ref() {
                 app.reload_config();
             } else {

@@ -146,6 +146,13 @@ pub struct App {
     pub edit: Option<PathBuf>,
     /// A body written for `v`, and the command to show it with; deleted once the viewer exits.
     pub viewing: Option<(tempfile::NamedTempFile, String)>,
+    /// A request file `:new` just created: removed if the editor leaves it empty.
+    pub created: Option<PathBuf>,
+    /// Sidebar width set by `<` `>` or dragging its edge; `None` fits the names.
+    pub sidebar_w: Option<u16>,
+    pub dragging: bool,
+    /// A destructive command waiting for its second press.
+    confirm: Option<(&'static str, Instant)>,
     pub quit: bool,
 }
 
@@ -194,6 +201,10 @@ impl App {
             content_rows: 0,
             edit: None,
             viewing: None,
+            created: None,
+            sidebar_w: None,
+            dragging: false,
+            confirm: None,
             quit: false,
         };
         app.matched = search(&app.requests, &app.filter);
@@ -429,7 +440,7 @@ impl App {
         let Some(req) = self.current().cloned() else { return };
         let key = (req.rel.clone(), self.env().to_string());
         if self.running.contains_key(&key) {
-            return self.say("already running · esc cancels", false);
+            return self.say("already running · esc to cancel", false);
         }
         let opts = RunOpts { env: key.1.clone(), asserts: self.asserts, extra_args: vec![] };
         self.next_job += 1;
@@ -603,13 +614,17 @@ impl App {
     pub fn picker_choose(&mut self) {
         self.mode = Mode::Normal;
         let Some(&idx) = self.picker.results.get(self.picker.sel) else { return };
-        // The sidebar filter could hide the pick; drop it rather than select nothing.
-        if !self.matched.contains(&idx) {
+        let rel = self.requests[idx].rel.clone();
+        self.select_rel(&rel);
+    }
+
+    /// Select a request by name, dropping the filter if it hides it.
+    fn select_rel(&mut self, rel: &str) {
+        if !self.matched.iter().any(|&i| self.requests[i].rel == rel) {
             self.filter.clear();
             self.matched = search(&self.requests, "");
         }
-        let rel = self.requests[idx].rel.clone();
-        self.rebuild(Some(Sel::Req(rel)), true);
+        self.rebuild(Some(Sel::Req(rel.to_string())), true);
         self.on_select();
     }
 
@@ -719,10 +734,145 @@ impl App {
         }
     }
 
+    /// `<` `>`: narrow or widen the sidebar for this session.
+    pub fn resize_sidebar(&mut self, delta: i16) {
+        if self.show_sidebar {
+            let w = self.sidebar_w.unwrap_or(self.hits.sidebar.width);
+            self.sidebar_w = Some(w.saturating_add_signed(delta));
+        }
+    }
+
+    /// Run `id` only if it was asked for twice within a few seconds.
+    fn confirmed(&mut self, id: &'static str, prompt: String) -> bool {
+        if self.confirm.take().is_some_and(|(c, at)| c == id && at.elapsed().as_secs() < 5) {
+            return true;
+        }
+        self.confirm = Some((id, Instant::now()));
+        self.say(prompt, true);
+        false
+    }
+
+    /// `C`: delete every stored run (all requests, all envs), after a second press.
+    pub fn clear_history(&mut self) {
+        let n = store::ids(&self.ws).len();
+        if n == 0 {
+            return self.say("no history to clear", false);
+        }
+        if !self.confirmed("clear-history", format!("delete all {n} stored runs? press C (or :clear-history) again")) {
+            return;
+        }
+        match store::clear(&self.ws) {
+            Ok(n) => self.say(format!("cleared {n} runs"), false),
+            Err(e) => self.say(format!("clear history: {e}"), true),
+        }
+        self.runs.clear();
+        self.latencies.clear();
+        self.on_select();
+    }
+
+    /// The folder new requests go in: the selected folder, or the selected request's.
+    fn current_dir(&self) -> String {
+        let path = match self.row() {
+            Some(Row::Dir { path, .. }) => return format!("{path}/"),
+            Some(Row::Req { idx, .. }) => &self.requests[*idx].rel,
+            None => return String::new(),
+        };
+        tree::parent(path).map(|p| format!("{p}/")).unwrap_or_default()
+    }
+
+    /// `a`: the `:` bar, ready for a name in the current folder.
+    pub fn prompt_new(&mut self) {
+        let dir = self.current_dir();
+        super::cmdline::open_with(self, &format!("new {dir}"));
+    }
+
+    /// `m`: the `:` bar, holding the selected request's name to edit.
+    pub fn prompt_rename(&mut self) {
+        let Some(rel) = self.current().map(|r| r.rel.clone()) else {
+            return self.say("select a request to rename", true);
+        };
+        super::cmdline::open_with(self, &format!("rename {rel}"));
+    }
+
+    /// Create `requests/<name>.hurl` from a stub, select it, and open it in the editor.
+    pub fn new_request(&mut self, name: &str) -> Result<(), String> {
+        let rel = request_name(name)?;
+        let path = self.ws.requests_dir().join(format!("{rel}.hurl"));
+        if path.exists() {
+            return Err(format!("{rel} already exists"));
+        }
+        // Start from the selected request's base URL variable, e.g. `{{api_url}}`.
+        let base = self
+            .current()
+            .and_then(|r| r.primary())
+            .and_then(|e| e.url.starts_with("{{").then(|| e.url.find("}}").map(|i| e.url[..i + 2].to_string())).flatten())
+            .unwrap_or_else(|| "https://example.com".into());
+        let stub = format!("# {}\nGET {base}/\n", tree::basename(&rel));
+        std::fs::create_dir_all(path.parent().unwrap_or(&path))
+            .and_then(|_| std::fs::write(&path, stub))
+            .map_err(|e| format!("new {rel}: {e}"))?;
+        self.reload();
+        self.select_rel(&rel);
+        self.created = Some(path.clone());
+        self.edit = Some(path);
+        Ok(())
+    }
+
+    /// Rename (or move) the selected request, taking its run history along.
+    pub fn rename_request(&mut self, name: &str) -> Result<(), String> {
+        let req = self.current().cloned().ok_or("select a request to rename")?;
+        let rel = request_name(name)?;
+        if rel == req.rel {
+            return Ok(());
+        }
+        if self.running.keys().any(|(r, _)| *r == req.rel) {
+            return Err(format!("{} is running", req.rel));
+        }
+        let dir = self.ws.requests_dir();
+        let path = dir.join(format!("{rel}.hurl"));
+        if path.exists() {
+            return Err(format!("{rel} already exists"));
+        }
+        std::fs::create_dir_all(path.parent().unwrap_or(&path))
+            .and_then(|_| std::fs::rename(&req.path, &path))
+            .map_err(|e| format!("rename: {e}"))?;
+        // Drop folders the move left empty (remove_dir refuses non-empty ones).
+        for d in tree::ancestors(&req.rel).collect::<Vec<_>>().into_iter().rev() {
+            let _ = std::fs::remove_dir(dir.join(d));
+        }
+        let moved = store::rename(&self.ws, &req.rel, &rel, &path);
+        self.runs.retain(|k, _| k.0 != req.rel);
+        self.latencies.retain(|k, _| k.0 != req.rel);
+        self.reload();
+        self.select_rel(&rel);
+        self.save_state();
+        match moved {
+            Ok(n) => self.say(format!("renamed {} → {rel}{}", req.rel, match n {
+                    0 => String::new(),
+                    1 => ", 1 run moved".into(),
+                    n => format!(", {n} runs moved"),
+                }), false),
+            Err(e) => self.say(format!("renamed {} → {rel}, but history was not moved: {e}", req.rel), true),
+        }
+        Ok(())
+    }
+
     pub fn reload_requests(&mut self) {
         self.reload();
         self.say(format!("reloaded {} requests", self.requests.len()), false);
     }
+}
+
+/// A request name from user input: `dir/name`, `.hurl` and a leading `/` optional.
+fn request_name(input: &str) -> Result<String, String> {
+    let s = input.trim().trim_start_matches('/');
+    let s = s.strip_prefix("requests/").unwrap_or(s);
+    let s = s.strip_suffix(".hurl").unwrap_or(s);
+    let ok = |p: &str| !p.is_empty() && p != "." && p != ".." && !p.starts_with('.');
+    if s.is_empty() || !s.split('/').all(ok) || s.contains(char::is_whitespace) {
+        return Err(format!("not a request name: '{input}' (want e.g. folder/name)"));
+    }
+    Ok(s.to_string())
 }
 
 struct TabBody {

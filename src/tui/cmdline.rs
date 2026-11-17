@@ -131,6 +131,28 @@ static ARG_CMDS: &[ArgCmd] = &[
         },
     },
     ArgCmd {
+        name: "new",
+        usage: "<folder/name>",
+        desc: "create requests/<folder/name>.hurl and open it in $EDITOR",
+        complete: complete_dirs,
+        run: |a, args| match args {
+            [] => Ok(a.prompt_new()),
+            [name] => a.new_request(name),
+            _ => usage("new"),
+        },
+    },
+    ArgCmd {
+        name: "rename",
+        usage: "<folder/name>",
+        desc: "rename or move the selected request, with its history",
+        complete: complete_dirs,
+        run: |a, args| match args {
+            [] => Ok(a.prompt_rename()),
+            [name] => a.rename_request(name),
+            _ => usage("rename"),
+        },
+    },
+    ArgCmd {
         name: "cancel",
         usage: "[all]",
         desc: "cancel the selected request's run, or every run",
@@ -153,6 +175,9 @@ static ARG_CMDS: &[ArgCmd] = &[
     },
 ];
 
+/// Arguments are free text: Enter runs what was typed, never a completion.
+const FREE_TEXT: &[&str] = &["new", "rename"];
+
 /// (alias, registry id)
 const ALIASES: &[(&str, &str)] = &[("q", "quit"), ("open", "edit"), ("history", "tab-meta")];
 
@@ -172,6 +197,17 @@ fn complete_set(app: &App, args: &[&str], partial: &str) -> Vec<(String, String,
     }
 }
 
+/// Existing folders, to put a new or renamed request in.
+fn complete_dirs(app: &App, args: &[&str], _: &str) -> Vec<(String, String, bool)> {
+    if !args.is_empty() {
+        return vec![];
+    }
+    let mut dirs: Vec<&str> = app.requests.iter().flat_map(|r| super::tree::ancestors(&r.rel)).collect();
+    dirs.sort_unstable();
+    dirs.dedup();
+    dirs.into_iter().map(|d| (format!("{d}/"), String::new(), false)).collect()
+}
+
 fn set(app: &mut App, args: &[&str], persist: bool) -> Result<(), String> {
     let name = if persist { "set!" } else { "set" };
     let Some((key, rest)) = args.split_first() else { return usage(name) };
@@ -180,7 +216,11 @@ fn set(app: &mut App, args: &[&str], persist: bool) -> Result<(), String> {
 }
 
 pub fn open(app: &mut App) {
-    app.cmdline = CmdLine::default();
+    open_with(app, "");
+}
+
+pub fn open_with(app: &mut App, input: &str) {
+    app.cmdline = CmdLine { input: input.into(), sel: 0 };
     app.mode = Mode::Command;
 }
 
@@ -274,8 +314,9 @@ pub fn edited(app: &mut App) {
 /// Enter: a partial word that matches nothing exactly takes the highlighted completion first,
 /// so `:exp<enter>` runs what the list shows.
 pub fn submit(app: &mut App) {
-    let (_, partial) = words(&app.cmdline.input);
-    if !partial.is_empty() {
+    let (done, partial) = words(&app.cmdline.input);
+    let free = done.first().is_some_and(|c| FREE_TEXT.contains(c));
+    if !partial.is_empty() && !free {
         let cands = completions(app);
         if !cands.iter().any(|c| c.text == partial) && cands.get(app.cmdline.sel).is_some() {
             accept(app);

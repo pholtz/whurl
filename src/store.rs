@@ -92,3 +92,37 @@ pub fn latencies(ws: &Workspace, request: &str, env: &str, limit: usize) -> Vec<
     out.reverse();
     out
 }
+
+/// Delete every stored run. Returns how many were removed.
+pub fn clear(ws: &Workspace) -> Result<usize> {
+    let all = ids(ws);
+    for id in &all {
+        fs::remove_file(runs_dir(ws).join(format!("{id}.json")))?;
+    }
+    Ok(all.len())
+}
+
+/// Move a request's history to its new name: ids embed the name, and each record holds it.
+pub fn rename(ws: &Workspace, from: &str, to: &str, file: &std::path::Path) -> Result<usize> {
+    let dir = runs_dir(ws);
+    let mut n = 0;
+    for id in ids_for(ws, from, None) {
+        let path = dir.join(format!("{id}.json"));
+        let mut v: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path)?)?;
+        // The suffix match alone would also catch `x_<from>`.
+        if v["request"] != from {
+            continue;
+        }
+        let env = v["env"].as_str().unwrap_or_default().to_string();
+        let old_tail = id_suffix(&env, from);
+        let Some(stem) = id.strip_suffix(&old_tail) else { continue };
+        let new_id = format!("{stem}{}", id_suffix(&env, to));
+        v["id"] = new_id.clone().into();
+        v["request"] = to.into();
+        v["file"] = file.to_string_lossy().into_owned().into();
+        fs::write(dir.join(format!("{new_id}.json")), serde_json::to_vec_pretty(&v)?)?;
+        fs::remove_file(&path)?;
+        n += 1;
+    }
+    Ok(n)
+}

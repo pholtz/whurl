@@ -82,6 +82,7 @@ Exit status: hurl's exit code when the run fails, 2 for whurl errors.
 page), `g`/`G` or `home`/`end` act on the focused one (main also: `space` page, `h/l` horizontal scroll with wrap off). Anywhere: `enter` run · `/` filter ·
 `e`/`E` env · `t` asserts · `1-4` Request, Response, Meta, Source · `w` wrap · `[ ]` entries in
 a chained file · `x`/`X` export Markdown/JSON to `.whurl/exports/` · `v` view the body in a viewer · `y` copy it to the clipboard · `o` open in `$EDITOR` ·
+`a` new request · `m` rename · `C` clear history · `<`/`>`/`=` sidebar width ·
 `R` reload · `?` all keys (enter runs the selected one) and the Config tab.
 The statusbar shows key hints and messages on the left; workspace, asserts, and the env on the right.
 
@@ -89,7 +90,15 @@ The sidebar is a folder tree that starts collapsed: `h/l` or `←→` close/open
 parent), `space`/`enter` toggle it. Filtering opens every folder holding a match. Open folders and the
 last selection persist in `.whurl/state.toml`. `ui.sidebar = "flat"` shows the ranked flat list instead;
 `"hidden"` gives the main pane the full width. `\` hides/shows the sidebar for the session, and
-`ctrl-p` (or `/` with the sidebar hidden) opens a fuzzy picker over all requests.
+`ctrl-p` (or `/` with the sidebar hidden) opens a fuzzy picker over all requests. `<` and `>` narrow
+and widen the sidebar (with the mouse on, drag its right edge); `=` fits it to the names again. The
+width is not saved.
+
+`a` (`:new <folder/name>`) creates `requests/<folder/name>.hurl` from a stub that reuses the selected
+request's base URL variable, then opens it in `$EDITOR`; save it empty to discard it. `m`
+(`:rename <folder/name>`) renames or moves the selected request and its run history; folders it leaves
+empty are removed. Both prefill the `:` bar, and `tab` completes existing folders.
+`C` (`:clear-history`, pressed twice) deletes every stored run for all requests and envs.
 
 `:` opens a command bar on the statusbar line. It runs any command from `?` by name (`:expand-all`,
 `:q`) plus a few that take arguments: `:env <name>`, `:tab <name>`, `:export md|json`,

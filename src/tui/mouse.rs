@@ -29,6 +29,14 @@ pub fn on_mouse(app: &mut App, m: MouseEvent) {
         }
         MouseEventKind::ScrollRight if in_main => app.scroll_h(8),
         MouseEventKind::ScrollLeft if in_main => app.scroll_h(-8),
+        // The sidebar's right border is a handle: drag it to resize.
+        MouseEventKind::Down(MouseButton::Left) if in_sidebar && pos.x + 1 == app.hits.sidebar.right() => {
+            app.dragging = true;
+        }
+        MouseEventKind::Drag(MouseButton::Left) if app.dragging => {
+            app.sidebar_w = Some(pos.x.saturating_sub(app.hits.sidebar.x) + 1);
+        }
+        MouseEventKind::Up(MouseButton::Left) => app.dragging = false,
         MouseEventKind::Down(MouseButton::Left) => {
             if let Some(&(_, tab)) = app.hits.tabs.iter().find(|(r, _)| r.contains(pos)) {
                 app.focus = Focus::Main;

@@ -21,7 +21,10 @@ pub fn draw(app: &mut App, f: &mut Frame) {
     let [main, foot] = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(f.area());
     let right = if app.show_sidebar {
         let list_w = app.requests.iter().map(|r| r.rel.len()).max().unwrap_or(20) as u16 + 9;
-        let list_w = list_w.min(main.width * 2 / 5).max(24);
+        let list_w = match app.sidebar_w {
+            Some(w) => w.clamp(16, main.width.saturating_sub(30).max(16)),
+            None => list_w.min(main.width * 2 / 5).max(24),
+        };
         let [left, right] = Layout::horizontal([Constraint::Length(list_w), Constraint::Min(0)]).areas(main);
         app.hits.sidebar = left;
         sidebar::draw(app, f, left);
