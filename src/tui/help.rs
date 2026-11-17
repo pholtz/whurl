@@ -68,6 +68,7 @@ pub enum Setting {
     Sidebar,
     Wrap,
     AutoSwitch,
+    Mouse,
     Asserts,
     DefaultEnv,
     Section(Group, &'static str),
@@ -75,7 +76,7 @@ pub enum Setting {
 }
 
 pub fn settings(cfg: &Config) -> Vec<Setting> {
-    let mut out = vec![Setting::Sidebar, Setting::Wrap, Setting::AutoSwitch, Setting::Asserts, Setting::DefaultEnv];
+    let mut out = vec![Setting::Sidebar, Setting::Wrap, Setting::AutoSwitch, Setting::Mouse, Setting::Asserts, Setting::DefaultEnv];
     for g in [Group::Request, Group::Response] {
         out.extend(g.order(cfg).into_iter().map(|s| Setting::Section(g, s)));
     }
@@ -104,6 +105,11 @@ pub fn describe(app: &App, s: &Setting) -> (String, String, String) {
             toggle(cfg.ui.auto_switch_response),
             "Switch to the Response tab when a run you started finishes and its request is still selected. ui.auto_switch_response"
                 .into(),
+        ),
+        Setting::Mouse => (
+            "Mouse".into(),
+            toggle(cfg.ui.mouse),
+            "Wheel scrolls the pane under the pointer; click focuses a pane, selects a row, opens a folder, or switches tab. While on, the terminal's own text selection needs a modifier: ⌥-drag in iTerm2/Ghostty, shift-drag in most others. ui.mouse".into(),
         ),
         Setting::Asserts => (
             "Asserts by default".into(),
@@ -221,6 +227,7 @@ fn change(app: &mut App, s: &Setting, c: Change) {
         Setting::Sidebar => ("ui.sidebar", cycle(&SidebarStyle::ALL, &cfg.ui.sidebar, c).name().to_string()),
         Setting::Wrap => ("ui.wrap", on_off(set(cfg.ui.wrap, c))),
         Setting::AutoSwitch => ("ui.auto_switch_response", on_off(set(cfg.ui.auto_switch_response, c))),
+        Setting::Mouse => ("ui.mouse", on_off(set(cfg.ui.mouse, c))),
         Setting::Asserts => ("run.asserts", on_off(set(cfg.run.asserts, c))),
         Setting::DefaultEnv => {
             let mut opts: Vec<Option<String>> = vec![None];

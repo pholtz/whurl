@@ -1,10 +1,12 @@
 //! Interactive view: pick a request, fire it, inspect the response.
 
 mod app;
+mod clipboard;
 mod cmdline;
 mod commands;
 mod help;
 mod jobs;
+mod mouse;
 mod settings;
 mod state;
 mod tree;
@@ -16,25 +18,46 @@ use anyhow::Result;
 use app::{App, Mode};
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
+
+/// Whether the terminal currently reports mouse events to us.
+static CAPTURED: AtomicBool = AtomicBool::new(false);
+
+/// Turn mouse capture on or off, if that changes anything.
+fn set_capture(on: bool) {
+    if CAPTURED.swap(on, Ordering::SeqCst) != on {
+        use ratatui::crossterm::{event::{DisableMouseCapture, EnableMouseCapture}, execute};
+        let _ = if on { execute!(std::io::stdout(), EnableMouseCapture) } else { execute!(std::io::stdout(), DisableMouseCapture) };
+    }
+}
 
 pub fn run(ws: Workspace, cfg: Config, query: Option<String>, env: String) -> Result<()> {
     let mut app = App::new(ws, cfg, query, env)?;
     let mut term = ratatui::init();
+    // ratatui's hook restores the terminal on panic but leaves mouse capture on.
+    let hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        set_capture(false);
+        hook(info)
+    }));
     let res = event_loop(&mut app, &mut term);
     app.shutdown();
+    set_capture(false);
     ratatui::restore();
     res
 }
 
 fn event_loop(app: &mut App, term: &mut DefaultTerminal) -> Result<()> {
     while !app.quit {
+        set_capture(app.cfg.ui.mouse);
         term.draw(|f| views::draw(app, f))?;
-        if event::poll(Duration::from_millis(80))?
-            && let Event::Key(k) = event::read()?
-            && k.kind == KeyEventKind::Press
-        {
-            on_key(app, k);
+        if event::poll(Duration::from_millis(80))? {
+            match event::read()? {
+                Event::Key(k) if k.kind == KeyEventKind::Press => on_key(app, k),
+                Event::Mouse(m) => mouse::on_mouse(app, m),
+                _ => {}
+            }
         }
         while let Ok(msg) = app.rx.try_recv() {
             app.on_msg(msg);
@@ -66,6 +89,7 @@ fn event_loop(app: &mut App, term: &mut DefaultTerminal) -> Result<()> {
 
 /// Leave the TUI to run `cmd <path>` through the shell, then come back.
 fn suspend(term: &mut DefaultTerminal, cmd: &str, path: &std::path::Path) -> std::io::Result<std::process::ExitStatus> {
+    set_capture(false);
     ratatui::restore();
     let status = std::process::Command::new("sh").arg("-c").arg(format!("{cmd} \"$1\"")).arg("sh").arg(path).status();
     *term = ratatui::init();

@@ -33,6 +33,13 @@ pub fn draw(app: &mut App, f: &mut Frame, area: Rect) {
             .divider(" "),
         tabs_area,
     );
+    // Tabs pads each title with a space either side and joins them with a 1-wide divider.
+    let mut x = tabs_area.x;
+    for (i, t) in TABS.iter().enumerate() {
+        let w = format!("{} {}", i + 1, t.title()).chars().count() as u16 + 2;
+        app.hits.tabs.push((Rect { x, y: tabs_area.y, width: w, height: 1 }.intersection(tabs_area), *t));
+        x += w + 1;
+    }
     if !tabs_line.is_empty() {
         f.render_widget(Line::from(tabs_line).right_aligned(), tabs_area);
     }

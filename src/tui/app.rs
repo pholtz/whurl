@@ -4,6 +4,7 @@ use crate::config::Config;
 use crate::run::{Entry, Run, RunOpts};
 use crate::store;
 use crate::workspace::{search, RequestFile, Workspace};
+use ratatui::layout::Rect;
 use ratatui::text::Line;
 use ratatui::widgets::ListState;
 use std::collections::{HashMap, HashSet};
@@ -80,6 +81,17 @@ pub struct View {
     pub rows_for: (u16, bool),
 }
 
+/// Where the last frame drew what, for routing mouse events.
+#[derive(Default)]
+pub struct Hits {
+    pub sidebar: Rect,
+    /// The sidebar's rows, below its border.
+    pub list: Rect,
+    /// Summary and content panes.
+    pub main: Rect,
+    pub tabs: Vec<(Rect, Tab)>,
+}
+
 /// The fuzzy request picker: `ctrl-p` anywhere, `/` when the sidebar is hidden.
 #[derive(Default)]
 pub struct Picker {
@@ -102,6 +114,7 @@ pub struct App {
     pub tree: bool,
     pub show_sidebar: bool,
     pub picker: Picker,
+    pub hits: Hits,
     pub cmdline: CmdLine,
     /// Open folders in tree mode (ignored while filtering: every folder with a match is open).
     pub expanded: HashSet<String>,
@@ -150,6 +163,7 @@ impl App {
             tree: cfg.ui.sidebar != SidebarStyle::Flat,
             show_sidebar: cfg.ui.sidebar != SidebarStyle::Hidden,
             picker: Picker::default(),
+            hits: Hits::default(),
             cmdline: CmdLine::default(),
             expanded: st.expanded.into_iter().collect(),
             ws,
@@ -346,6 +360,11 @@ impl App {
 
     pub fn page(&self) -> isize {
         self.content_height.max(2) as isize
+    }
+
+/// Sidebar rows visible in the last frame.
+    pub fn list_page(&self) -> isize {
+        (self.hits.list.height as isize).max(2)
     }
 
     pub fn scroll_by(&mut self, delta: isize) {
@@ -626,33 +645,58 @@ impl App {
     }
 
     /// `v`: the Request tab shows the request body, every other tab the response body.
-    pub fn view_body(&mut self) {
-        let Some(e) = self.current_entry() else {
-            return self.say("nothing to view: run the request first", true);
-        };
+    /// The body `v` and `y` act on: the request body on the Request tab, else the response
+    /// body, pretty-printed (already redacted), with an extension for its type.
+    fn tab_body(&self) -> Result<TabBody, String> {
+        let e = self.current_entry().ok_or("no run yet: press enter first")?;
         let (body, headers, what) = match (self.tab, &e.response) {
             (Tab::Request, _) => (e.request.body.as_deref(), &e.request.headers, "request"),
-            (_, Some(r)) if r.binary => return self.say("binary response body: export it instead", true),
+            (_, Some(r)) if r.binary => return Err("binary response body: export it instead".into()),
             (_, Some(r)) => (r.body.as_deref(), &r.headers, "response"),
-            (_, None) => return self.say("no response", true),
+            (_, None) => return Err("no response".into()),
         };
-        let Some(body) = body.filter(|b| !b.is_empty()) else {
-            return self.say(format!("empty {what} body"), true);
-        };
+        let body = body.filter(|b| !b.is_empty()).ok_or_else(|| format!("empty {what} body"))?;
         let ctype = headers.iter().find(|h| h.name.eq_ignore_ascii_case("content-type")).map(|h| h.value.as_str());
-        let ext = extension(ctype, body);
-        let truncated = what == "response" && e.response.as_ref().is_some_and(|r| r.truncated);
-        let text = crate::export::pretty(body);
+        Ok(TabBody {
+            text: crate::export::pretty(body),
+            ext: extension(ctype, body),
+            what,
+            truncated: what == "response" && e.response.as_ref().is_some_and(|r| r.truncated),
+        })
+    }
+
+    /// `v`: open the body in the viewer.
+    pub fn view_body(&mut self) {
+        let b = match self.tab_body() {
+            Ok(b) => b,
+            Err(e) => return self.say(e, true),
+        };
         // tempfile creates it 0600; it is removed when dropped after the viewer exits.
-        let file = tempfile::Builder::new().prefix("whurl-").suffix(&format!(".{ext}")).tempfile();
-        match file.and_then(|mut f| std::io::Write::write_all(&mut f, text.as_bytes()).map(|_| f)) {
+        let file = tempfile::Builder::new().prefix("whurl-").suffix(&format!(".{}", b.ext)).tempfile();
+        match file.and_then(|mut f| std::io::Write::write_all(&mut f, b.text.as_bytes()).map(|_| f)) {
             Ok(f) => {
-                if truncated {
+                if b.truncated {
                     self.say("the stored body was truncated", true);
                 }
                 self.viewing = Some((f, viewer_command(&self.cfg.viewer.command)));
             }
             Err(e) => self.say(format!("view: {e}"), true),
+        }
+    }
+
+    /// `y`: copy the body to the system clipboard.
+    pub fn copy_body(&mut self) {
+        let b = match self.tab_body() {
+            Ok(b) => b,
+            Err(e) => return self.say(e, true),
+        };
+        match super::clipboard::copy(&b.text) {
+            Ok(via) => {
+                let size = crate::export::bytes(b.text.len() as u64);
+                let note = if b.truncated { " (truncated when stored)" } else { "" };
+                self.say(format!("copied {} body, {size}{note}{via}", b.what), b.truncated);
+            }
+            Err(e) => self.say(format!("copy failed: {e}"), true),
         }
     }
 
@@ -679,6 +723,13 @@ impl App {
         self.reload();
         self.say(format!("reloaded {} requests", self.requests.len()), false);
     }
+}
+
+struct TabBody {
+    text: String,
+    ext: &'static str,
+    what: &'static str,
+    truncated: bool,
 }
 
 /// `viewer.command`, else `$VISUAL`/`$EDITOR` (read-only where the editor has a flag for it),

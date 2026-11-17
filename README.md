@@ -39,6 +39,7 @@ workspace = "~/path/to/workspace"   # used when the cwd isn't inside one
 [ui]
 wrap = true                       # `w` toggles
 auto_switch_response = true
+mouse = false                     # wheel scroll + clicks; copy then needs ⌥-drag (iTerm2/Ghostty) or shift-drag
 
 [request]
 sections = ["headers", "body", "curl"]   # display order; omit one to hide it
@@ -77,10 +78,10 @@ Exit status: hurl's exit code when the run fails, 2 for whurl errors.
 
 ## TUI
 
-`tab` moves focus between the sidebar and the main pane; `↑↓`/`jk`, `g`/`G` act on the focused one
-(main also: `space`, `ctrl-d/u` page, `h/l` horizontal scroll with wrap off). Anywhere: `enter` run · `/` filter ·
+`tab` moves focus between the sidebar and the main pane; `↑↓`/`jk`, `pgup`/`pgdn`, `ctrl-d/u` (half
+page), `g`/`G` or `home`/`end` act on the focused one (main also: `space` page, `h/l` horizontal scroll with wrap off). Anywhere: `enter` run · `/` filter ·
 `e`/`E` env · `t` asserts · `1-4` Request, Response, Meta, Source · `w` wrap · `[ ]` entries in
-a chained file · `x`/`X` export Markdown/JSON to `.whurl/exports/` · `v` view the body in a viewer · `o` open in `$EDITOR` ·
+a chained file · `x`/`X` export Markdown/JSON to `.whurl/exports/` · `v` view the body in a viewer · `y` copy it to the clipboard · `o` open in `$EDITOR` ·
 `R` reload · `?` all keys (enter runs the selected one) and the Config tab.
 The statusbar shows key hints and messages on the left; workspace, asserts, and the env on the right.
 
@@ -100,6 +101,13 @@ the current one, so `\` then `:set! ui.sidebar` keeps the sidebar). `tab` comple
 `v` writes the current entry's body (the request body on the Request tab, else the response),
 pretty-printed and already redacted, to a private temp file named for its content type, opens it in
 `viewer.command`, and deletes it when the viewer exits.
+`y` (or `:copy`) copies that same body to the clipboard via pbcopy, wl-copy, xclip, or xsel, else
+OSC 52 (tmux needs `set -g set-clipboard on` for that).
+
+With `ui.mouse = true` (or `:set ui.mouse on`) the wheel scrolls the pane under the pointer (the
+sidebar moves the selection; overlays move theirs), and a click focuses a pane, selects a row, opens or
+closes a folder, or switches tab. Mouse capture turns off the terminal's own drag-to-select, so copy
+with ⌥-drag in iTerm2/Ghostty or shift-drag in most other terminals.
 
 The tab stays put as you move between requests; when a run you started finishes and the request
 is still selected, the view switches to Response. The summary shows the latency waterfall (dns, connect,

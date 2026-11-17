@@ -17,16 +17,19 @@ use std::time::Duration;
 use theme::{ACCENT, SPINNER};
 
 pub fn draw(app: &mut App, f: &mut Frame) {
+    app.hits = Default::default();
     let [main, foot] = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(f.area());
     let right = if app.show_sidebar {
         let list_w = app.requests.iter().map(|r| r.rel.len()).max().unwrap_or(20) as u16 + 9;
         let list_w = list_w.min(main.width * 2 / 5).max(24);
         let [left, right] = Layout::horizontal([Constraint::Length(list_w), Constraint::Min(0)]).areas(main);
+        app.hits.sidebar = left;
         sidebar::draw(app, f, left);
         right
     } else {
         main
     };
+    app.hits.main = right;
     let [summary, content] = Layout::vertical([Constraint::Length(6), Constraint::Min(0)]).areas(right);
     summary::draw(app, f, summary);
     content::draw(app, f, content);

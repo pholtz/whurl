@@ -78,6 +78,7 @@ pub fn draw(app: &mut App, f: &mut Frame, area: Rect) {
         .highlight_style(Style::new().bg(Color::Indexed(237)).add_modifier(Modifier::BOLD))
         .highlight_symbol("▌");
     f.render_stateful_widget(list, list_area, &mut app.list);
+    app.hits.list = list_area;
     if let Some(a) = filter_area {
         let cursor = if app.mode == Mode::Filter { "▏" } else { "" };
         f.render_widget(

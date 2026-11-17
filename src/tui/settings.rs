@@ -9,6 +9,7 @@ pub const KEYS: &[(&str, &str)] = &[
     ("ui.sidebar", "tree | flat | hidden"),
     ("ui.wrap", "on | off"),
     ("ui.auto_switch_response", "on | off"),
+    ("ui.mouse", "on | off"),
     ("run.asserts", "on | off"),
     ("run.default_env", "an env name, or unset"),
     ("request.sections", "comma list of headers, body, curl"),
@@ -42,6 +43,7 @@ pub fn get(app: &App, key: &str) -> Option<String> {
         },
         "ui.wrap" => on_off(app.wrap),
         "ui.auto_switch_response" => on_off(c.ui.auto_switch_response),
+        "ui.mouse" => on_off(c.ui.mouse),
         "run.asserts" => on_off(app.asserts),
         "run.default_env" => c.run.default_env.clone().unwrap_or_else(|| "unset".into()),
         "request.sections" => c.request.or(REQUEST_SECTIONS).join(","),
@@ -113,6 +115,11 @@ pub fn set(app: &mut App, key: &str, value: Option<&str>, persist: bool) -> Resu
         "ui.auto_switch_response" => {
             let v = parse_bool(&value)?;
             app.cfg.ui.auto_switch_response = v;
+            Some(v.into())
+        }
+        "ui.mouse" => {
+            let v = parse_bool(&value)?;
+            app.cfg.ui.mouse = v;
             Some(v.into())
         }
         "run.asserts" => {

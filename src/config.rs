@@ -45,6 +45,8 @@ pub struct Ui {
     pub sidebar: SidebarStyle,
     pub wrap: bool,
     pub auto_switch_response: bool,
+    /// Wheel scroll and clicks; capturing the mouse means copy needs ⌥/shift-drag.
+    pub mouse: bool,
     pub theme: String,
 }
 
@@ -54,6 +56,7 @@ impl Default for Ui {
             sidebar: SidebarStyle::default(),
             wrap: true,
             auto_switch_response: true,
+            mouse: false,
             theme: "default".into(),
         }
     }
