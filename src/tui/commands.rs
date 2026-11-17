@@ -114,6 +114,8 @@ pub static COMMANDS: &[Command] = &[
     cmd!("edit", Global, [k('o')], "open the .hurl file in $EDITOR", |a| a.edit_current()),
     cmd!("new", Global, [k('a')], "new request: name it, then edit it in $EDITOR", |a| a.prompt_new()),
     cmd!("rename", Global, [k('m')], "rename or move the request, with its history", |a| a.prompt_rename()),
+    cmd!("duplicate", Global, [k('d')], "copy the request under a new name and open it in $EDITOR", |a| a.prompt_duplicate()),
+    cmd!("delete", Global, [k('D')], "delete the request file and its history (asks to confirm)", |a| a.delete_request()),
     cmd!("clear-history", Global, [k('C')], "delete all stored runs (asks to confirm)", |a| a.clear_history()),
     cmd!("sidebar-narrower", Global, [k('<')], "narrow the sidebar (or drag its edge)", |a| a.resize_sidebar(-4)),
     cmd!("sidebar-wider", Global, [k('>')], "widen the sidebar", |a| a.resize_sidebar(4)),

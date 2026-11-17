@@ -153,6 +153,17 @@ static ARG_CMDS: &[ArgCmd] = &[
         },
     },
     ArgCmd {
+        name: "duplicate",
+        usage: "<folder/name>",
+        desc: "copy the selected request to a new name and open it in $EDITOR",
+        complete: complete_dirs,
+        run: |a, args| match args {
+            [] => Ok(a.prompt_duplicate()),
+            [name] => a.duplicate_request(name),
+            _ => usage("duplicate"),
+        },
+    },
+    ArgCmd {
         name: "cancel",
         usage: "[all]",
         desc: "cancel the selected request's run, or every run",
@@ -176,7 +187,7 @@ static ARG_CMDS: &[ArgCmd] = &[
 ];
 
 /// Arguments are free text: Enter runs what was typed, never a completion.
-const FREE_TEXT: &[&str] = &["new", "rename"];
+const FREE_TEXT: &[&str] = &["new", "rename", "duplicate"];
 
 /// (alias, registry id)
 const ALIASES: &[(&str, &str)] = &[("q", "quit"), ("open", "edit"), ("history", "tab-meta")];

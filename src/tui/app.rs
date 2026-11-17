@@ -152,7 +152,8 @@ pub struct App {
     pub sidebar_w: Option<u16>,
     pub dragging: bool,
     /// A destructive command waiting for its second press.
-    confirm: Option<(&'static str, Instant)>,
+    /// What it acts on is part of the id, so a second press on something else asks again.
+    confirm: Option<(String, Instant)>,
     pub quit: bool,
 }
 
@@ -310,13 +311,20 @@ impl App {
         }
     }
 
+    /// Re-read request files. Rows index into `requests`, so the selection is captured by name
+    /// before the list changes under them.
     pub fn reload(&mut self) {
+        let before = self.sel();
         match self.ws.requests() {
             Ok(r) => self.requests = r,
-            Err(e) => self.say(format!("{e:#}"), true),
+            Err(e) => return self.say(format!("{e:#}"), true),
         }
         self.view = None;
-        self.refilter(false);
+        self.matched = search(&self.requests, &self.filter);
+        self.rebuild(before.clone(), true);
+        if self.sel() != before {
+            self.on_select();
+        }
     }
 
     /// Load the latest stored run for the selection (once) and reset the view.
@@ -743,7 +751,7 @@ impl App {
     }
 
     /// Run `id` only if it was asked for twice within a few seconds.
-    fn confirmed(&mut self, id: &'static str, prompt: String) -> bool {
+    fn confirmed(&mut self, id: String, prompt: String) -> bool {
         if self.confirm.take().is_some_and(|(c, at)| c == id && at.elapsed().as_secs() < 5) {
             return true;
         }
@@ -758,7 +766,7 @@ impl App {
         if n == 0 {
             return self.say("no history to clear", false);
         }
-        if !self.confirmed("clear-history", format!("delete all {n} stored runs? press C (or :clear-history) again")) {
+        if !self.confirmed("clear-history".into(), format!("delete all {n} stored runs? press C (or :clear-history) again")) {
             return;
         }
         match store::clear(&self.ws) {
@@ -792,6 +800,71 @@ impl App {
             return self.say("select a request to rename", true);
         };
         super::cmdline::open_with(self, &format!("rename {rel}"));
+    }
+
+    /// `d`: the `:` bar, holding a name for the copy.
+    pub fn prompt_duplicate(&mut self) {
+        let Some(rel) = self.current().map(|r| r.rel.clone()) else {
+            return self.say("select a request to duplicate", true);
+        };
+        super::cmdline::open_with(self, &format!("duplicate {rel}_copy"));
+    }
+
+    /// Copy the selected request to `requests/<name>.hurl`, select it, and open it in the editor.
+    pub fn duplicate_request(&mut self, name: &str) -> Result<(), String> {
+        let req = self.current().cloned().ok_or("select a request to duplicate")?;
+        let rel = request_name(name)?;
+        let path = self.ws.requests_dir().join(format!("{rel}.hurl"));
+        if path.exists() {
+            return Err(format!("{rel} already exists"));
+        }
+        std::fs::create_dir_all(path.parent().unwrap_or(&path))
+            .and_then(|_| std::fs::copy(&req.path, &path))
+            .map_err(|e| format!("duplicate: {e}"))?;
+        self.reload();
+        self.select_rel(&rel);
+        self.edit = Some(path);
+        Ok(())
+    }
+
+    /// `D`: delete the selected request's file and its run history, after a second press.
+    pub fn delete_request(&mut self) {
+        let Some(req) = self.current().cloned() else {
+            return self.say("select a request to delete", true);
+        };
+        if self.running.keys().any(|(r, _)| *r == req.rel) {
+            return self.say(format!("{} is running", req.rel), true);
+        }
+        if !self.confirmed(format!("delete {}", req.rel), format!("delete {} and its history? press D (or :delete) again", req.rel)) {
+            return;
+        }
+        if let Err(e) = std::fs::remove_file(&req.path) {
+            return self.say(format!("delete: {e}"), true);
+        }
+        self.prune_dirs(&req.rel);
+        let removed = store::remove(&self.ws, &req.rel);
+        self.runs.retain(|k, _| k.0 != req.rel);
+        self.latencies.retain(|k, _| k.0 != req.rel);
+        // Land on the row that took its place.
+        let at = self.list.selected().unwrap_or(0);
+        self.reload();
+        if !self.rows.is_empty() {
+            self.list.select(Some(at.min(self.rows.len() - 1)));
+            self.on_select();
+        }
+        self.save_state();
+        match removed {
+            Ok(_) => self.say(format!("deleted {}", req.rel), false),
+            Err(e) => self.say(format!("deleted {}, but not its history: {e}", req.rel), true),
+        }
+    }
+
+    /// Remove folders above `rel` that are now empty (remove_dir refuses non-empty ones).
+    fn prune_dirs(&self, rel: &str) {
+        let dir = self.ws.requests_dir();
+        for d in tree::ancestors(rel).collect::<Vec<_>>().into_iter().rev() {
+            let _ = std::fs::remove_dir(dir.join(d));
+        }
     }
 
     /// Create `requests/<name>.hurl` from a stub, select it, and open it in the editor.
@@ -836,10 +909,7 @@ impl App {
         std::fs::create_dir_all(path.parent().unwrap_or(&path))
             .and_then(|_| std::fs::rename(&req.path, &path))
             .map_err(|e| format!("rename: {e}"))?;
-        // Drop folders the move left empty (remove_dir refuses non-empty ones).
-        for d in tree::ancestors(&req.rel).collect::<Vec<_>>().into_iter().rev() {
-            let _ = std::fs::remove_dir(dir.join(d));
-        }
+        self.prune_dirs(&req.rel);
         let moved = store::rename(&self.ws, &req.rel, &rel, &path);
         self.runs.retain(|k, _| k.0 != req.rel);
         self.latencies.retain(|k, _| k.0 != req.rel);

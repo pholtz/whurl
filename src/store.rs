@@ -102,6 +102,22 @@ pub fn clear(ws: &Workspace) -> Result<usize> {
     Ok(all.len())
 }
 
+/// Delete one request's runs. Returns how many were removed.
+pub fn remove(ws: &Workspace, request: &str) -> Result<usize> {
+    let dir = runs_dir(ws);
+    let mut n = 0;
+    for id in ids_for(ws, request, None) {
+        let path = dir.join(format!("{id}.json"));
+        let v: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path)?)?;
+        // The suffix match alone would also catch `x_<request>`.
+        if v["request"] == request {
+            fs::remove_file(&path)?;
+            n += 1;
+        }
+    }
+    Ok(n)
+}
+
 /// Move a request's history to its new name: ids embed the name, and each record holds it.
 pub fn rename(ws: &Workspace, from: &str, to: &str, file: &std::path::Path) -> Result<usize> {
     let dir = runs_dir(ws);
