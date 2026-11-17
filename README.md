@@ -83,7 +83,9 @@ The statusbar shows key hints and messages on the left; workspace, asserts, and 
 
 The sidebar is a folder tree that starts collapsed: `h/l` or `←→` close/open a folder (or jump to its
 parent), `space`/`enter` toggle it. Filtering opens every folder holding a match. Open folders and the
-last selection persist in `.whurl/state.toml`. `ui.sidebar = "flat"` shows the ranked flat list instead.
+last selection persist in `.whurl/state.toml`. `ui.sidebar = "flat"` shows the ranked flat list instead;
+`"hidden"` gives the main pane the full width. `\` hides/shows the sidebar for the session, and
+`ctrl-p` (or `/` with the sidebar hidden) opens a fuzzy picker over all requests.
 
 The tab stays put as you move between requests; when a run you started finishes and the request
 is still selected, the view switches to Response. The summary shows the latency waterfall (dns, connect,

@@ -70,6 +70,29 @@ fn on_key(app: &mut App, k: KeyEvent) {
     }
     match app.mode {
         Mode::Help => help::on_key(app, &k),
+        Mode::Picker => match k.code {
+            KeyCode::Esc => app.mode = Mode::Normal,
+            KeyCode::Enter => app.picker_choose(),
+            KeyCode::Down => app.picker_move(1),
+            KeyCode::Up => app.picker_move(-1),
+            KeyCode::Char('n' | 'j') if ctrl => app.picker_move(1),
+            KeyCode::Char('p' | 'k') if ctrl => app.picker_move(-1),
+            KeyCode::PageDown => app.picker_move(10),
+            KeyCode::PageUp => app.picker_move(-10),
+            KeyCode::Char('u') if ctrl => {
+                app.picker.query.clear();
+                app.picker_refilter();
+            }
+            KeyCode::Backspace => {
+                app.picker.query.pop();
+                app.picker_refilter();
+            }
+            KeyCode::Char(c) if !ctrl => {
+                app.picker.query.push(c);
+                app.picker_refilter();
+            }
+            _ => {}
+        },
         Mode::Filter => match k.code {
             KeyCode::Esc => {
                 app.filter.clear();

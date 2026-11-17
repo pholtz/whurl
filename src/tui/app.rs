@@ -44,6 +44,7 @@ pub enum Mode {
     Normal,
     Filter,
     Help,
+    Picker,
 }
 
 /// Which pane movement keys act on.
@@ -77,6 +78,15 @@ pub struct View {
     pub rows_for: (u16, bool),
 }
 
+/// The fuzzy request picker: `ctrl-p` anywhere, `/` when the sidebar is hidden.
+#[derive(Default)]
+pub struct Picker {
+    pub query: String,
+    /// Indices into `requests`, best first.
+    pub results: Vec<usize>,
+    pub sel: usize,
+}
+
 pub struct App {
     pub ws: Workspace,
     pub cfg: Config,
@@ -88,6 +98,8 @@ pub struct App {
     pub rows: Vec<Row>,
     pub list: ListState,
     pub tree: bool,
+    pub show_sidebar: bool,
+    pub picker: Picker,
     /// Open folders in tree mode (ignored while filtering: every folder with a match is open).
     pub expanded: HashSet<String>,
     pub envs: Vec<String>,
@@ -126,10 +138,13 @@ impl App {
         let env = envs.iter().position(|e| *e == env).unwrap_or(0);
         let (tx, rx) = channel();
         let st = UiState::load(&ws);
+        let cfg_hidden = cfg.ui.sidebar == SidebarStyle::Hidden;
         let mut app = App {
             matched: vec![],
             rows: vec![],
-            tree: cfg.ui.sidebar == SidebarStyle::Tree,
+            tree: cfg.ui.sidebar != SidebarStyle::Flat,
+            show_sidebar: cfg.ui.sidebar != SidebarStyle::Hidden,
+            picker: Picker::default(),
             expanded: st.expanded.into_iter().collect(),
             ws,
             asserts: cfg.run.asserts,
@@ -142,7 +157,7 @@ impl App {
             env,
             mode: Mode::Normal,
             help: Help::default(),
-            focus: Focus::Sidebar,
+            focus: if cfg_hidden { Focus::Main } else { Focus::Sidebar },
             tab: Tab::Request,
             entry: 0,
             scroll: (0, 0),
@@ -164,6 +179,7 @@ impl App {
         let keep = if app.filter.is_empty() { st.selected.map(Sel::Req) } else { app.best() };
         app.rebuild(keep, true);
         app.on_select();
+        app.leave_folder();
         Ok(app)
     }
 
@@ -346,6 +362,9 @@ impl App {
     // ---- actions -------------------------------------------------------------------------
 
     pub fn toggle_focus(&mut self) {
+        if !self.show_sidebar {
+            return;
+        }
         self.focus = match self.focus {
             Focus::Sidebar => Focus::Main,
             Focus::Main => Focus::Sidebar,
@@ -353,6 +372,9 @@ impl App {
     }
 
     pub fn open_filter(&mut self) {
+        if !self.show_sidebar {
+            return self.open_picker();
+        }
         self.focus = Focus::Sidebar;
         self.mode = Mode::Filter;
     }
@@ -492,6 +514,79 @@ impl App {
         self.say(format!("sidebar: {}", if self.tree { "tree" } else { "flat" }), false);
     }
 
+    /// `\`: hide or show the sidebar for this session (config sets the startup default).
+    pub fn toggle_sidebar_visible(&mut self) {
+        self.show_sidebar = !self.show_sidebar;
+        self.focus = if self.show_sidebar { Focus::Sidebar } else { Focus::Main };
+        self.rebuild_keep(true);
+        self.leave_folder();
+    }
+
+    /// Match `cfg.ui.sidebar` after it changed.
+    pub fn apply_sidebar_style(&mut self) {
+        let style = self.cfg.ui.sidebar;
+        self.show_sidebar = style != SidebarStyle::Hidden;
+        if style != SidebarStyle::Hidden {
+            self.tree = style == SidebarStyle::Tree;
+        }
+        if !self.show_sidebar {
+            self.focus = Focus::Main;
+        }
+        self.rebuild_keep(true);
+        self.leave_folder();
+    }
+
+    /// With no sidebar a selected folder is a dead end: move to its first request.
+    fn leave_folder(&mut self) {
+        if self.show_sidebar {
+            return;
+        }
+        let Some(Row::Dir { path, .. }) = self.row().cloned() else { return };
+        let prefix = format!("{path}/");
+        let mut inside: Vec<&String> =
+            self.matched.iter().map(|&i| &self.requests[i].rel).filter(|r| r.starts_with(&prefix)).collect();
+        inside.sort();
+        if let Some(rel) = inside.first().map(|r| r.to_string()) {
+            self.rebuild(Some(Sel::Req(rel)), true);
+            self.on_select();
+        }
+    }
+
+    // ---- picker --------------------------------------------------------------------------
+
+    pub fn open_picker(&mut self) {
+        let cur = self.current().map(|r| r.rel.clone());
+        self.picker = Picker::default();
+        self.picker.results = search(&self.requests, "");
+        self.picker.sel = cur.and_then(|c| self.picker.results.iter().position(|&i| self.requests[i].rel == c)).unwrap_or(0);
+        self.mode = Mode::Picker;
+    }
+
+    pub fn picker_refilter(&mut self) {
+        self.picker.results = search(&self.requests, &self.picker.query);
+        self.picker.sel = 0;
+    }
+
+    pub fn picker_move(&mut self, delta: isize) {
+        let n = self.picker.results.len() as isize;
+        if n > 0 {
+            self.picker.sel = (self.picker.sel as isize + delta).clamp(0, n - 1) as usize;
+        }
+    }
+
+    pub fn picker_choose(&mut self) {
+        self.mode = Mode::Normal;
+        let Some(&idx) = self.picker.results.get(self.picker.sel) else { return };
+        // The sidebar filter could hide the pick; drop it rather than select nothing.
+        if !self.matched.contains(&idx) {
+            self.filter.clear();
+            self.matched = search(&self.requests, "");
+        }
+        let rel = self.requests[idx].rel.clone();
+        self.rebuild(Some(Sel::Req(rel)), true);
+        self.on_select();
+    }
+
     fn save_state(&self) {
         let mut expanded: Vec<String> = self.expanded.iter().cloned().collect();
         expanded.sort();
@@ -533,10 +628,9 @@ impl App {
             Ok(cfg) => {
                 self.wrap = cfg.ui.wrap;
                 self.asserts = cfg.run.asserts;
-                self.tree = cfg.ui.sidebar == SidebarStyle::Tree;
                 self.cfg = cfg;
                 self.view = None;
-                self.rebuild_keep(true);
+                self.apply_sidebar_style();
                 self.say("config reloaded", false);
             }
             Err(e) => self.say(format!("{e:#}"), true),

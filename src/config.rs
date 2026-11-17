@@ -19,24 +19,29 @@ pub struct Config {
 
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
 #[serde(rename_all = "lowercase")]
-pub enum Layout {
-    #[default]
-    Sidebar,
-    Focus,
-}
-
-#[derive(Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
-#[serde(rename_all = "lowercase")]
 pub enum SidebarStyle {
     #[default]
     Tree,
     Flat,
+    /// No sidebar: the main pane takes the width and `/` / `ctrl-p` open the picker.
+    Hidden,
+}
+
+impl SidebarStyle {
+    pub const ALL: [SidebarStyle; 3] = [SidebarStyle::Tree, SidebarStyle::Flat, SidebarStyle::Hidden];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            SidebarStyle::Tree => "tree",
+            SidebarStyle::Flat => "flat",
+            SidebarStyle::Hidden => "hidden",
+        }
+    }
 }
 
 #[derive(Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Ui {
-    pub layout: Layout,
     pub sidebar: SidebarStyle,
     pub wrap: bool,
     pub auto_switch_response: bool,
@@ -46,7 +51,6 @@ pub struct Ui {
 impl Default for Ui {
     fn default() -> Self {
         Self {
-            layout: Layout::default(),
             sidebar: SidebarStyle::default(),
             wrap: true,
             auto_switch_response: true,

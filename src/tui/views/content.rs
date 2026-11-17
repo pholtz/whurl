@@ -37,7 +37,12 @@ pub fn draw(app: &mut App, f: &mut Frame, area: Rect) {
         f.render_widget(Line::from(tabs_line).right_aligned(), tabs_area);
     }
     app.content_height = body.height as usize;
-    let Some(key) = app.key() else { return };
+    // A folder gets a pseudo key (the trailing `/` can't clash with a request) so its hint shows.
+    let key = match (app.key(), app.row()) {
+        (Some(k), _) => k,
+        (None, Some(crate::tui::tree::Row::Dir { path, .. })) => (format!("{path}/"), String::new()),
+        _ => return,
+    };
 
     let vk = ViewKey {
         running: app.running.contains_key(&key),

@@ -2,6 +2,7 @@
 
 mod content;
 mod help;
+mod picker;
 mod sidebar;
 mod summary;
 pub mod theme;
@@ -16,16 +17,23 @@ use theme::{ACCENT, SPINNER};
 
 pub fn draw(app: &mut App, f: &mut Frame) {
     let [main, foot] = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(f.area());
-    let list_w = app.requests.iter().map(|r| r.rel.len()).max().unwrap_or(20) as u16 + 9;
-    let list_w = list_w.min(main.width * 2 / 5).max(24);
-    let [left, right] = Layout::horizontal([Constraint::Length(list_w), Constraint::Min(0)]).areas(main);
-    sidebar::draw(app, f, left);
+    let right = if app.show_sidebar {
+        let list_w = app.requests.iter().map(|r| r.rel.len()).max().unwrap_or(20) as u16 + 9;
+        let list_w = list_w.min(main.width * 2 / 5).max(24);
+        let [left, right] = Layout::horizontal([Constraint::Length(list_w), Constraint::Min(0)]).areas(main);
+        sidebar::draw(app, f, left);
+        right
+    } else {
+        main
+    };
     let [summary, content] = Layout::vertical([Constraint::Length(6), Constraint::Min(0)]).areas(right);
     summary::draw(app, f, summary);
     content::draw(app, f, content);
     draw_footer(app, f, foot);
-    if app.mode == Mode::Help {
-        help::draw(app, f);
+    match app.mode {
+        Mode::Help => help::draw(app, f),
+        Mode::Picker => picker::draw(app, f),
+        _ => {}
     }
 }
 
@@ -67,7 +75,12 @@ fn draw_footer(app: &App, f: &mut Frame, area: Rect) {
     let width = area.width as usize;
     let sep = || Span::styled(" · ", Style::new().dark_gray());
     let mut hints = Line::from(Span::raw(" "));
-    for (i, (k, v)) in [("enter", "run"), ("?", "help"), ("q", "quit")].into_iter().enumerate() {
+    let keys: &[(&str, &str)] = if app.show_sidebar {
+        &[("enter", "run"), ("?", "help"), ("q", "quit")]
+    } else {
+        &[("enter", "run"), ("/", "find"), ("?", "help"), ("q", "quit")]
+    };
+    for (i, &(k, v)) in keys.iter().enumerate() {
         if i > 0 {
             hints.push_span(sep());
         }

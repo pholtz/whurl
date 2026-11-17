@@ -97,8 +97,8 @@ pub fn describe(app: &App, s: &Setting) -> (String, String, String) {
     match s {
         Setting::Sidebar => (
             "Sidebar".into(),
-            format!("‹ {} ›", if cfg.ui.sidebar == SidebarStyle::Tree { "tree" } else { "flat" }),
-            "Tree folds requests into folders; flat is one ranked list of full paths. ui.sidebar".into(),
+            format!("‹ {} ›", cfg.ui.sidebar.name()),
+            "Tree folds requests into folders; flat is one ranked list of full paths; hidden gives the main pane the full width and / or ctrl-p open the picker. `\\` hides/shows it for this session only. ui.sidebar".into(),
         ),
         Setting::Wrap => (
             "Wrap lines".into(),
@@ -217,14 +217,13 @@ fn set(old: bool, c: Change) -> bool {
 fn change(app: &mut App, s: &Setting, c: Change) {
     match s {
         Setting::Sidebar => {
-            // Two values, so ←, → and enter all flip it.
-            let tree = app.cfg.ui.sidebar != SidebarStyle::Tree;
-            app.cfg.ui.sidebar = if tree { SidebarStyle::Tree } else { SidebarStyle::Flat };
-            if app.tree != tree {
-                app.tree = tree;
-                app.rebuild_keep(true);
-            }
-            save(app, "ui", "sidebar", Some(if tree { "tree" } else { "flat" }.into()));
+            let all = SidebarStyle::ALL;
+            let cur = all.iter().position(|s| *s == app.cfg.ui.sidebar).unwrap_or(0) as isize;
+            let delta = if matches!(c, Change::Off) { -1 } else { 1 };
+            let next = all[(cur + delta).rem_euclid(all.len() as isize) as usize];
+            app.cfg.ui.sidebar = next;
+            app.apply_sidebar_style();
+            save(app, "ui", "sidebar", Some(next.name().into()));
         }
         Setting::Wrap => {
             let v = set(app.cfg.ui.wrap, c);
