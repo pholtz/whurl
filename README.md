@@ -49,6 +49,9 @@ sections = ["headers", "body"]
 [run]
 default_env = "staging"
 asserts = false
+
+[viewer]
+command = ""                      # `v`; empty → $VISUAL/$EDITOR (-R for vi/vim/nvim), else less
 ```
 
 ## CLI
@@ -77,7 +80,7 @@ Exit status: hurl's exit code when the run fails, 2 for whurl errors.
 `tab` moves focus between the sidebar and the main pane; `↑↓`/`jk`, `g`/`G` act on the focused one
 (main also: `space`, `ctrl-d/u` page, `h/l` horizontal scroll with wrap off). Anywhere: `enter` run · `/` filter ·
 `e`/`E` env · `t` asserts · `1-4` Request, Response, Meta, Source · `w` wrap · `[ ]` entries in
-a chained file · `x`/`X` export Markdown/JSON to `.whurl/exports/` · `o` open in `$EDITOR` ·
+a chained file · `x`/`X` export Markdown/JSON to `.whurl/exports/` · `v` view the body in a viewer · `o` open in `$EDITOR` ·
 `R` reload · `?` all keys (enter runs the selected one) and the Config tab.
 The statusbar shows key hints and messages on the left; workspace, asserts, and the env on the right.
 
@@ -93,6 +96,10 @@ last selection persist in `.whurl/state.toml`. `ui.sidebar = "flat"` shows the r
 setting for the session; `:set! <key> [value]` also saves it to the config file (with no value it saves
 the current one, so `\` then `:set! ui.sidebar` keeps the sidebar). `tab` completes, `↑↓` choose, and
 `enter` takes the highlighted completion when the word is unfinished.
+
+`v` writes the current entry's body (the request body on the Request tab, else the response),
+pretty-printed and already redacted, to a private temp file named for its content type, opens it in
+`viewer.command`, and deletes it when the viewer exits.
 
 The tab stays put as you move between requests; when a run you started finishes and the request
 is still selected, the view switches to Response. The summary shows the latency waterfall (dns, connect,

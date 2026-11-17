@@ -39,17 +39,18 @@ fn event_loop(app: &mut App, term: &mut DefaultTerminal) -> Result<()> {
         while let Ok(msg) = app.rx.try_recv() {
             app.on_msg(msg);
         }
+        if let Some((file, cmd)) = app.viewing.take() {
+            match suspend(term, &cmd, file.path()) {
+                Ok(s) if !s.success() => {
+                    app.say(format!("viewer exited with {}", s.code().map_or("a signal".into(), |c| c.to_string())), true)
+                }
+                Ok(_) => {}
+                Err(e) => app.say(format!("{cmd}: {e}"), true),
+            }
+        }
         if let Some(path) = app.edit.take() {
-            ratatui::restore();
             let editor = std::env::var("VISUAL").or_else(|_| std::env::var("EDITOR")).unwrap_or_else(|_| "vi".into());
-            let status = std::process::Command::new("sh")
-                .arg("-c")
-                .arg(format!("{editor} \"$1\""))
-                .arg("sh")
-                .arg(&path)
-                .status();
-            *term = ratatui::init();
-            if let Err(e) = status {
+            if let Err(e) = suspend(term, &editor, &path) {
                 app.say(format!("editor: {e}"), true);
             }
             if Some(&path) == crate::config::Config::path().as_ref() {
@@ -61,6 +62,14 @@ fn event_loop(app: &mut App, term: &mut DefaultTerminal) -> Result<()> {
         app.tick = app.tick.wrapping_add(1);
     }
     Ok(())
+}
+
+/// Leave the TUI to run `cmd <path>` through the shell, then come back.
+fn suspend(term: &mut DefaultTerminal, cmd: &str, path: &std::path::Path) -> std::io::Result<std::process::ExitStatus> {
+    ratatui::restore();
+    let status = std::process::Command::new("sh").arg("-c").arg(format!("{cmd} \"$1\"")).arg("sh").arg(path).status();
+    *term = ratatui::init();
+    status
 }
 
 /// Overlays and text inputs see keys first; everything else goes through the registry.

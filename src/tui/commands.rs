@@ -109,6 +109,7 @@ pub static COMMANDS: &[Command] = &[
     cmd!("entry-prev", Global, [k('[')], "previous entry in a chained file", |a| a.cycle_entry(-1)),
     cmd!("export-md", Global, [k('x')], "export run as Markdown to .whurl/exports", |a| a.export(false)),
     cmd!("export-json", Global, [k('X')], "export run as JSON to .whurl/exports", |a| a.export(true)),
+    cmd!("view", Global, [k('v')], "view the body in viewer.command ($EDITOR -R, less); Request tab: request body", |a| a.view_body()),
     cmd!("edit", Global, [k('o')], "open the .hurl file in $EDITOR", |a| a.edit_current()),
     cmd!("reload", Global, [k('R')], "reload request files", |a| a.reload_requests()),
     cmd!("command", Global, [k(':')], "command bar: any command by name, plus env, set, export…", super::cmdline::open),

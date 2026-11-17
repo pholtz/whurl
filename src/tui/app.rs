@@ -131,6 +131,8 @@ pub struct App {
     /// Total screen rows of the main pane's content, as last drawn.
     pub content_rows: usize,
     pub edit: Option<PathBuf>,
+    /// A body written for `v`, and the command to show it with; deleted once the viewer exits.
+    pub viewing: Option<(tempfile::NamedTempFile, String)>,
     pub quit: bool,
 }
 
@@ -177,6 +179,7 @@ impl App {
             content_height: 20,
             content_rows: 0,
             edit: None,
+            viewing: None,
             quit: false,
         };
         app.matched = search(&app.requests, &app.filter);
@@ -622,6 +625,37 @@ impl App {
         }
     }
 
+    /// `v`: the Request tab shows the request body, every other tab the response body.
+    pub fn view_body(&mut self) {
+        let Some(e) = self.current_entry() else {
+            return self.say("nothing to view: run the request first", true);
+        };
+        let (body, headers, what) = match (self.tab, &e.response) {
+            (Tab::Request, _) => (e.request.body.as_deref(), &e.request.headers, "request"),
+            (_, Some(r)) if r.binary => return self.say("binary response body: export it instead", true),
+            (_, Some(r)) => (r.body.as_deref(), &r.headers, "response"),
+            (_, None) => return self.say("no response", true),
+        };
+        let Some(body) = body.filter(|b| !b.is_empty()) else {
+            return self.say(format!("empty {what} body"), true);
+        };
+        let ctype = headers.iter().find(|h| h.name.eq_ignore_ascii_case("content-type")).map(|h| h.value.as_str());
+        let ext = extension(ctype, body);
+        let truncated = what == "response" && e.response.as_ref().is_some_and(|r| r.truncated);
+        let text = crate::export::pretty(body);
+        // tempfile creates it 0600; it is removed when dropped after the viewer exits.
+        let file = tempfile::Builder::new().prefix("whurl-").suffix(&format!(".{ext}")).tempfile();
+        match file.and_then(|mut f| std::io::Write::write_all(&mut f, text.as_bytes()).map(|_| f)) {
+            Ok(f) => {
+                if truncated {
+                    self.say("the stored body was truncated", true);
+                }
+                self.viewing = Some((f, viewer_command(&self.cfg.viewer.command)));
+            }
+            Err(e) => self.say(format!("view: {e}"), true),
+        }
+    }
+
     pub fn edit_current(&mut self) {
         self.edit = self.current().map(|r| r.path.clone());
     }
@@ -644,6 +678,45 @@ impl App {
     pub fn reload_requests(&mut self) {
         self.reload();
         self.say(format!("reloaded {} requests", self.requests.len()), false);
+    }
+}
+
+/// `viewer.command`, else `$VISUAL`/`$EDITOR` (read-only where the editor has a flag for it),
+/// else `less`.
+fn viewer_command(configured: &str) -> String {
+    if !configured.trim().is_empty() {
+        return configured.to_string();
+    }
+    let Some(ed) = std::env::var("VISUAL").or_else(|_| std::env::var("EDITOR")).ok().filter(|e| !e.trim().is_empty()) else {
+        return "less".into();
+    };
+    let bin = ed.split_whitespace().next().unwrap_or_default().rsplit('/').next().unwrap_or_default();
+    match bin {
+        "vi" | "vim" | "nvim" | "view" | "gvim" | "mvim" => format!("{ed} -R"),
+        "nano" => format!("{ed} -v"),
+        _ => ed,
+    }
+}
+
+/// File extension for a body, so the viewer picks the right syntax.
+fn extension(ctype: Option<&str>, body: &str) -> &'static str {
+    let c = ctype.unwrap_or_default().to_lowercase();
+    let by_type = [
+        ("json", "json"),
+        ("html", "html"),
+        ("xml", "xml"),
+        ("javascript", "js"),
+        ("css", "css"),
+        ("csv", "csv"),
+        ("yaml", "yaml"),
+        ("graphql", "graphql"),
+        ("x-www-form-urlencoded", "txt"),
+        ("text/plain", "txt"),
+    ];
+    match by_type.iter().find(|(k, _)| c.contains(k)) {
+        Some((_, ext)) => ext,
+        None if crate::export::is_json(body) => "json",
+        None => "txt",
     }
 }
 
