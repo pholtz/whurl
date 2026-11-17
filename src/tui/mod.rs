@@ -2,6 +2,7 @@
 
 mod app;
 mod commands;
+mod help;
 mod jobs;
 mod state;
 mod tree;
@@ -49,7 +50,11 @@ fn event_loop(app: &mut App, term: &mut DefaultTerminal) -> Result<()> {
             if let Err(e) = status {
                 app.say(format!("editor: {e}"), true);
             }
-            app.reload();
+            if Some(&path) == crate::config::Config::path().as_ref() {
+                app.reload_config();
+            } else {
+                app.reload();
+            }
         }
         app.tick = app.tick.wrapping_add(1);
     }
@@ -64,11 +69,7 @@ fn on_key(app: &mut App, k: KeyEvent) {
         return;
     }
     match app.mode {
-        Mode::Help => {
-            if matches!(k.code, KeyCode::Esc | KeyCode::Char('?' | 'q') | KeyCode::Enter) {
-                app.mode = Mode::Normal;
-            }
-        }
+        Mode::Help => help::on_key(app, &k),
         Mode::Filter => match k.code {
             KeyCode::Esc => {
                 app.filter.clear();

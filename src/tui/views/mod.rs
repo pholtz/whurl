@@ -1,24 +1,21 @@
 //! Rendering. Views read `App` and never change selection or run state.
 
 mod content;
+mod help;
 mod sidebar;
 mod summary;
 pub mod theme;
 
 use super::app::{App, Mode};
-use super::commands::{Scope, COMMANDS};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, Paragraph};
 use std::time::Duration;
-use theme::{centered, panel, ACCENT, SPINNER};
+use theme::{ACCENT, SPINNER};
 
 pub fn draw(app: &mut App, f: &mut Frame) {
-    let [top, main, foot] =
-        Layout::vertical([Constraint::Length(1), Constraint::Min(0), Constraint::Length(1)]).areas(f.area());
-    draw_top(app, f, top);
+    let [main, foot] = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(f.area());
     let list_w = app.requests.iter().map(|r| r.rel.len()).max().unwrap_or(20) as u16 + 9;
     let list_w = list_w.min(main.width * 2 / 5).max(24);
     let [left, right] = Layout::horizontal([Constraint::Length(list_w), Constraint::Min(0)]).areas(main);
@@ -28,44 +25,46 @@ pub fn draw(app: &mut App, f: &mut Frame) {
     content::draw(app, f, content);
     draw_footer(app, f, foot);
     if app.mode == Mode::Help {
-        draw_help(f);
+        help::draw(app, f);
     }
 }
 
-fn draw_top(app: &App, f: &mut Frame, area: Rect) {
-    let env = app.env();
-    let env_style = match env {
+/// Right side of the statusbar: workspace, env badge, asserts, and in-flight runs.
+fn state_line(app: &App) -> Line<'static> {
+    let env = app.env().to_string();
+    let env_style = match env.as_str() {
         "production" => Style::new().bg(Color::Red).fg(Color::White).bold(),
         "staging" => Style::new().bg(Color::Yellow).fg(Color::Black).bold(),
         "local" => Style::new().bg(Color::Green).fg(Color::Black).bold(),
         _ => Style::new().bg(Color::Blue).fg(Color::White).bold(),
     };
-    let mut spans = vec![
-        Span::styled(" whurl ", Style::new().bg(Color::Indexed(238)).bold()),
-        Span::raw(" "),
-        Span::styled(format!(" {env} "), env_style),
-        Span::raw(" "),
-        if app.asserts {
-            Span::styled(" asserts on ", Style::new().fg(Color::Black).bg(Color::Cyan))
-        } else {
-            Span::styled("asserts off", Style::new().dark_gray())
-        },
-        Span::raw("  "),
-        Span::styled(app.ws.root.display().to_string(), Style::new().dark_gray()),
-    ];
+    let mut spans = vec![];
     if !app.running.is_empty() {
         spans.push(Span::styled(
-            format!("   {} {} running", SPINNER[app.tick % SPINNER.len()], app.running.len()),
+            format!("{} {} running  ", SPINNER[app.tick % SPINNER.len()], app.running.len()),
             Style::new().yellow(),
         ));
     }
-    f.render_widget(Line::from(spans), area);
+    let ws = app.ws.root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    spans.extend([
+        Span::styled(format!("{ws}  "), Style::new().dark_gray()),
+        if app.asserts {
+            Span::styled(" asserts ", Style::new().fg(Color::Black).bg(ACCENT))
+        } else {
+            Span::styled("asserts off", Style::new().dark_gray())
+        },
+        Span::raw(" "),
+        Span::styled(format!(" {env} "), env_style),
+    ]);
+    Line::from(spans)
 }
 
-/// Key hints, then the latest toast after them. The toast only covers the hints when the
-/// terminal is too narrow to fit both, so nothing shifts.
+/// Key hints, the latest toast after them, and state on the right. The toast only covers the
+/// hints (then the state) when the terminal is too narrow to fit them side by side, so nothing
+/// shifts.
 fn draw_footer(app: &App, f: &mut Frame, area: Rect) {
     const MIN_TOAST: usize = 20;
+    let width = area.width as usize;
     let sep = || Span::styled(" · ", Style::new().dark_gray());
     let mut hints = Line::from(Span::raw(" "));
     for (i, (k, v)) in [("enter", "run"), ("?", "help"), ("q", "quit")].into_iter().enumerate() {
@@ -75,22 +74,33 @@ fn draw_footer(app: &App, f: &mut Frame, area: Rect) {
         hints.push_span(Span::styled(k, Style::new().cyan()));
         hints.push_span(Span::styled(format!(" {v}"), Style::new().dark_gray()));
     }
+    let state = state_line(app);
+    let state_w = state.width() + 1;
     let toast = app.flash.as_ref().filter(|(_, _, at)| at.elapsed() < Duration::from_secs(4));
-    let Some((msg, err, _)) = toast else {
-        f.render_widget(hints, area);
-        return;
+    let left = match toast {
+        None => hints,
+        Some((msg, err, _)) => {
+            let style = if *err { Style::new().red() } else { Style::new().green() };
+            let msg = msg.lines().next().unwrap_or_default();
+            let need = MIN_TOAST.min(msg.chars().count());
+            let after_hints = width.saturating_sub(hints.width() + 3 + state_w + 1);
+            let alone = width.saturating_sub(state_w + 2);
+            if after_hints >= need {
+                hints.push_span(sep());
+                hints.push_span(Span::styled(ellipsize(msg, after_hints), style));
+                hints
+            } else if alone >= need {
+                Line::from(Span::styled(format!(" {}", ellipsize(msg, alone)), style))
+            } else {
+                let line = Line::from(Span::styled(format!(" {}", ellipsize(msg, width.saturating_sub(1))), style));
+                return f.render_widget(line, area);
+            }
+        }
     };
-    let style = if *err { Style::new().red() } else { Style::new().green() };
-    let msg = msg.lines().next().unwrap_or_default();
-    let room = (area.width as usize).saturating_sub(hints.width() + 3);
-    let line = if room >= MIN_TOAST.min(msg.chars().count()) {
-        hints.push_span(sep());
-        hints.push_span(Span::styled(ellipsize(msg, room), style));
-        hints
-    } else {
-        Line::from(Span::styled(format!(" {}", ellipsize(msg, (area.width as usize).saturating_sub(1))), style))
-    };
-    f.render_widget(line, area);
+    // The env badge wins over hints: they are clipped, it never is.
+    let [l, r] = Layout::horizontal([Constraint::Min(0), Constraint::Length(state_w as u16)]).areas(area);
+    f.render_widget(left, l);
+    f.render_widget(state, r);
 }
 
 fn ellipsize(s: &str, max: usize) -> String {
@@ -100,35 +110,4 @@ fn ellipsize(s: &str, max: usize) -> String {
     let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
     out.push('…');
     out
-}
-
-/// Placeholder until phase 6's plantmon-style modal; generated from the registry so it can't drift.
-fn draw_help(f: &mut Frame) {
-    let column = |scopes: &[Scope]| -> Vec<Line<'static>> {
-        let mut out = vec![];
-        for &s in scopes {
-            if !out.is_empty() {
-                out.push(Line::default());
-            }
-            out.push(Line::from(Span::styled(s.title(), Style::new().fg(ACCENT).bold())));
-            for c in COMMANDS.iter().filter(|c| c.scope == s) {
-                out.push(Line::from(vec![
-                    Span::styled(format!("{:<14}", c.key_labels()), Style::new().cyan()),
-                    Span::raw(c.desc),
-                ]));
-            }
-        }
-        out
-    };
-    let left = column(&[Scope::Global]);
-    let right = column(&[Scope::Sidebar, Scope::Main]);
-    let h = left.len().max(right.len()) as u16 + 2;
-    let area = centered(f.area(), 112, h);
-    f.render_widget(Clear, area);
-    let block = panel(true).title(" keys · esc closes ");
-    let inner = block.inner(area);
-    f.render_widget(block, area);
-    let [l, r] = Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)]).spacing(2).areas(inner);
-    f.render_widget(Paragraph::new(left), l);
-    f.render_widget(Paragraph::new(right), r);
 }

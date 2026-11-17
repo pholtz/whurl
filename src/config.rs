@@ -116,6 +116,15 @@ impl Config {
         Ok(cfg)
     }
 
+    /// The config path for display, with `$HOME` shown as `~`.
+    pub fn display_path() -> String {
+        let Some(p) = Self::path() else { return "(no config location)".into() };
+        match home().and_then(|h| p.strip_prefix(h).ok().map(|r| format!("~/{}", r.display()))) {
+            Some(s) => s,
+            None => p.display().to_string(),
+        }
+    }
+
     pub fn workspace(&self) -> Option<PathBuf> {
         self.workspace.as_deref().map(expand_tilde)
     }
@@ -124,6 +133,44 @@ impl Config {
     pub fn env(&self, cli: Option<String>) -> String {
         cli.or_else(|| self.run.default_env.clone()).unwrap_or_else(|| "local".into())
     }
+}
+
+/// Write one key back to the config file, keeping its comments and layout. `None` removes it.
+pub fn save_key(table: &str, key: &str, value: Option<toml_edit::Value>) -> Result<PathBuf> {
+    let path = Config::path().context("no config location: set $HOME or $XDG_CONFIG_HOME")?;
+    let src = match std::fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
+    };
+    let out = set_key(&src, table, key, value).with_context(|| format!("parsing {}", path.display()))?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(&path, out).with_context(|| format!("writing {}", path.display()))?;
+    Ok(path)
+}
+
+fn set_key(src: &str, table: &str, key: &str, value: Option<toml_edit::Value>) -> Result<String> {
+    let mut doc: toml_edit::DocumentMut = src.parse()?;
+    match value {
+        Some(mut v) => {
+            if !doc.contains_key(table) {
+                doc[table] = toml_edit::table();
+            }
+            // Keep a trailing `# comment` on the line being replaced.
+            if let Some(old) = doc[table].get(key).and_then(toml_edit::Item::as_value) {
+                *v.decor_mut() = old.decor().clone();
+            }
+            doc[table][key] = toml_edit::Item::Value(v);
+        }
+        None => {
+            if let Some(t) = doc.get_mut(table).and_then(toml_edit::Item::as_table_like_mut) {
+                t.remove(key);
+            }
+        }
+    }
+    Ok(doc.to_string())
 }
 
 fn home() -> Option<PathBuf> {
@@ -135,5 +182,24 @@ fn expand_tilde(p: &str) -> PathBuf {
         (Some(rest), Some(h)) => h.join(rest),
         _ if p == "~" => home().unwrap_or_else(|| p.into()),
         _ => p.into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Settings changed from the TUI must not wipe the user's comments or reorder their file.
+    #[test]
+    fn write_back_keeps_comments() {
+        let src = "# mine\n[ui]\nwrap = true # keep\nsidebar = \"tree\"\n\n[run]\n# env\ndefault_env = \"local\"\n";
+        let out = set_key(src, "ui", "wrap", Some(false.into())).unwrap();
+        assert_eq!(out, src.replace("wrap = true", "wrap = false"));
+        let out = set_key(&out, "run", "default_env", None).unwrap();
+        assert!(out.contains("# mine") && !out.contains("default_env"), "{out}");
+        let out = set_key("", "response", "sections", Some(toml_edit::Array::from_iter(["body"]).into())).unwrap();
+        assert_eq!(out, "[response]\nsections = [\"body\"]\n");
+        let cfg: Config = toml::from_str(&out).unwrap();
+        assert_eq!(cfg.response.sections, Some(vec!["body".into()]));
     }
 }

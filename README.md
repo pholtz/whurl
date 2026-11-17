@@ -30,6 +30,9 @@ and `env/`, then `workspace` in the config. The env defaults to `-e`, `$HURL_ENV
 `$XDG_CONFIG_HOME/whurl/config.toml` (default `~/.config/whurl/config.toml`). Optional; unknown
 keys are errors.
 
+`?` → Config tab in the TUI edits the common settings live and writes them back, keeping your
+comments; "Edit config file" opens it in `$EDITOR` and reloads it afterwards.
+
 ```toml
 workspace = "~/path/to/workspace"   # used when the cwd isn't inside one
 
@@ -75,7 +78,8 @@ Exit status: hurl's exit code when the run fails, 2 for whurl errors.
 (main also: `space`, `ctrl-d/u` page, `h/l` horizontal scroll with wrap off). Anywhere: `enter` run · `/` filter ·
 `e`/`E` env · `t` asserts · `1-4` Request, Response, Meta, Source · `w` wrap · `[ ]` entries in
 a chained file · `x`/`X` export Markdown/JSON to `.whurl/exports/` · `o` open in `$EDITOR` ·
-`R` reload · `?` all keys.
+`R` reload · `?` all keys (enter runs the selected one) and the Config tab.
+The statusbar shows key hints and messages on the left; workspace, asserts, and the env on the right.
 
 The sidebar is a folder tree that starts collapsed: `h/l` or `←→` close/open a folder (or jump to its
 parent), `space`/`enter` toggle it. Filtering opens every folder holding a match. Open folders and the

@@ -9,6 +9,7 @@ use ratatui::widgets::ListState;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use super::jobs::{Job, Msg, Outcome};
+use super::help::Help;
 use super::state::UiState;
 use super::tree::{self, Row, Sel};
 use crate::config::SidebarStyle;
@@ -93,6 +94,7 @@ pub struct App {
     pub env: usize,
     pub asserts: bool,
     pub mode: Mode,
+    pub help: Help,
     pub focus: Focus,
     pub tab: Tab,
     pub wrap: bool,
@@ -139,6 +141,7 @@ impl App {
             envs,
             env,
             mode: Mode::Normal,
+            help: Help::default(),
             focus: Focus::Sidebar,
             tab: Tab::Request,
             entry: 0,
@@ -239,7 +242,7 @@ impl App {
     }
 
     /// Rebuild rows keeping the selection, and reset the view only if the selection changed.
-    fn rebuild_keep(&mut self, reveal: bool) {
+    pub fn rebuild_keep(&mut self, reveal: bool) {
         let before = self.sel();
         self.rebuild(before.clone(), reveal);
         if self.sel() != before {
@@ -522,6 +525,22 @@ impl App {
 
     pub fn edit_current(&mut self) {
         self.edit = self.current().map(|r| r.path.clone());
+    }
+
+    /// After the config file was edited by hand.
+    pub fn reload_config(&mut self) {
+        match Config::load() {
+            Ok(cfg) => {
+                self.wrap = cfg.ui.wrap;
+                self.asserts = cfg.run.asserts;
+                self.tree = cfg.ui.sidebar == SidebarStyle::Tree;
+                self.cfg = cfg;
+                self.view = None;
+                self.rebuild_keep(true);
+                self.say("config reloaded", false);
+            }
+            Err(e) => self.say(format!("{e:#}"), true),
+        }
     }
 
     pub fn reload_requests(&mut self) {

@@ -109,7 +109,7 @@ pub static COMMANDS: &[Command] = &[
     cmd!("export-json", Global, [k('X')], "export run as JSON to .whurl/exports", |a| a.export(true)),
     cmd!("edit", Global, [k('o')], "open the .hurl file in $EDITOR", |a| a.edit_current()),
     cmd!("reload", Global, [k('R')], "reload request files", |a| a.reload_requests()),
-    cmd!("help", Global, [k('?')], "help", |a| a.mode = super::app::Mode::Help),
+    cmd!("help", Global, [k('?')], "this help, and the Config tab", super::help::open),
     cmd!("quit", Global, [k('q'), ctrl('c')], "quit", |a| a.quit = true),
     cmd!("down", Sidebar, [k('j'), code(K::Down)], "next request", |a| a.move_sel(1)),
     cmd!("up", Sidebar, [k('k'), code(K::Up)], "previous request", |a| a.move_sel(-1)),
