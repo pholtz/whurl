@@ -1,15 +1,31 @@
 # whurl
 
-"With hurl": a CLI and TUI over a workspace of [Hurl](https://hurl.dev) files, built for
-a `requests/` + `env/` layout. It runs hurl with the right env and secrets files, shows status,
-latency breakdown, size, headers, and body, keeps a run history, and exports runs as Markdown or
-JSON for agents.
+An ergonomic CLI and TUI over your [Hurl](https://hurl.dev) files.
+
+If you are willing to structure your hurl files and environment files, then `whurl` makes it easier to invoke them. Since it delegates to hurl under the hood, this is mainly for ease of use when making requests by hand. For programmatic use cases, you should probably just continue to use `hurl` directly. I originally built this as a replacement for postman, after becoming increasingly annoyed with it. Hurl files are extremely easy to get started with, and easy to use programmatically (for example, in CI) but when you want to use the same files during development, the experience becomes a bit more clumsy. Initially, this leads to small scripts or programs to make this less verbose -- `whurl` attempts to improve that bespoke experience.
+
+Colloquially, `whurl` stands for `with hurl`, but you're welcome to make up your own definition.
+
+Note: expects `hurl` on your system `PATH`.
 
 ```sh
-cargo install --path .        # puts `whurl` in ~/.cargo/bin
-```
+# Build and install
+cargo build --release
+cargo install --path .
 
-Requires `hurl` on `PATH`.
+# You can tell whurl where your workspace is in several ways:
+# whurl list                                <-- inside of an existing workspace
+# whurl --workspace ~/my-workspace/         <-- with each request
+# export WHURL_WORKSPACE='~/my-workspace/`  <-- once per session
+# vim ~/.config/whurl/config.toml           <-- once per machine
+
+# Usage
+whurl list
+whurl run petstore/get_all_pets --env production
+whurl show
+whurl history
+whurl tui
+```
 
 ## Workspace
 
@@ -54,27 +70,6 @@ asserts = false
 [viewer]
 command = ""                      # `v`; empty → $VISUAL/$EDITOR (-R for vi/vim/nvim), else less
 ```
-
-## CLI
-
-```sh
-whurl                                   # TUI (in a terminal)
-whurl ls [query]                        # list requests (--json)
-whurl run get_segment_size -e staging   # fuzzy name or path; -i headers, -t asserts
-whurl run seg size --body | jq .        # raw body only
-whurl run health -e staging --json      # full run record
-whurl run create_job -x /tmp/run.md     # also export
-whurl run x -- --very-verbose           # extra hurl args after --
-whurl show [last|last~2|<id>|<name>]    # re-render a stored run
-whurl history [query] -n 50             # alias: log
-whurl export [run] -f md|json -o FILE   # agent-friendly dump (stdout without -o)
-whurl envs                              # env vars; secret names only
-```
-
-A name resolves to a path, an exact request name (`semantics/get_segment_size`), a unique file
-stem (`get_segment_size`), or a unique fuzzy match.
-
-Exit status: hurl's exit code when the run fails, 2 for whurl errors.
 
 ## TUI
 
