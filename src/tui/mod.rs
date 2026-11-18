@@ -27,8 +27,15 @@ static CAPTURED: AtomicBool = AtomicBool::new(false);
 /// Turn mouse capture on or off, if that changes anything.
 fn set_capture(on: bool) {
     if CAPTURED.swap(on, Ordering::SeqCst) != on {
-        use ratatui::crossterm::{event::{DisableMouseCapture, EnableMouseCapture}, execute};
-        let _ = if on { execute!(std::io::stdout(), EnableMouseCapture) } else { execute!(std::io::stdout(), DisableMouseCapture) };
+        use ratatui::crossterm::{
+            event::{DisableMouseCapture, EnableMouseCapture},
+            execute,
+        };
+        let _ = if on {
+            execute!(std::io::stdout(), EnableMouseCapture)
+        } else {
+            execute!(std::io::stdout(), DisableMouseCapture)
+        };
     }
 }
 
@@ -64,15 +71,21 @@ fn event_loop(app: &mut App, term: &mut DefaultTerminal) -> Result<()> {
         }
         if let Some((file, cmd)) = app.viewing.take() {
             match suspend(term, &cmd, file.path()) {
-                Ok(s) if !s.success() => {
-                    app.say(format!("viewer exited with {}", s.code().map_or("a signal".into(), |c| c.to_string())), true)
-                }
+                Ok(s) if !s.success() => app.say(
+                    format!(
+                        "viewer exited with {}",
+                        s.code().map_or("a signal".into(), |c| c.to_string())
+                    ),
+                    true,
+                ),
                 Ok(_) => {}
                 Err(e) => app.say(format!("{cmd}: {e}"), true),
             }
         }
         if let Some(path) = app.edit.take() {
-            let editor = std::env::var("VISUAL").or_else(|_| std::env::var("EDITOR")).unwrap_or_else(|_| "vi".into());
+            let editor = std::env::var("VISUAL")
+                .or_else(|_| std::env::var("EDITOR"))
+                .unwrap_or_else(|_| "vi".into());
             if let Err(e) = suspend(term, &editor, &path) {
                 app.say(format!("editor: {e}"), true);
             }
@@ -82,7 +95,11 @@ fn event_loop(app: &mut App, term: &mut DefaultTerminal) -> Result<()> {
                 && std::fs::remove_file(&path).is_ok()
             {
                 let top = app.ws.requests_dir();
-                for d in path.ancestors().skip(1).take_while(|d| d.starts_with(&top) && *d != top) {
+                for d in path
+                    .ancestors()
+                    .skip(1)
+                    .take_while(|d| d.starts_with(&top) && *d != top)
+                {
                     let _ = std::fs::remove_dir(d); // only if the new request left it empty
                 }
                 app.say("empty request discarded", false);
@@ -99,10 +116,19 @@ fn event_loop(app: &mut App, term: &mut DefaultTerminal) -> Result<()> {
 }
 
 /// Leave the TUI to run `cmd <path>` through the shell, then come back.
-fn suspend(term: &mut DefaultTerminal, cmd: &str, path: &std::path::Path) -> std::io::Result<std::process::ExitStatus> {
+fn suspend(
+    term: &mut DefaultTerminal,
+    cmd: &str,
+    path: &std::path::Path,
+) -> std::io::Result<std::process::ExitStatus> {
     set_capture(false);
     ratatui::restore();
-    let status = std::process::Command::new("sh").arg("-c").arg(format!("{cmd} \"$1\"")).arg("sh").arg(path).status();
+    let status = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!("{cmd} \"$1\""))
+        .arg("sh")
+        .arg(path)
+        .status();
     *term = ratatui::init();
     status
 }

@@ -6,7 +6,12 @@ use std::collections::{BTreeMap, HashSet};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Row {
     /// A folder, by its path under `requests/` (e.g. `job/admin`).
-    Dir { path: String, depth: usize, open: bool, count: usize },
+    Dir {
+        path: String,
+        depth: usize,
+        open: bool,
+        count: usize,
+    },
     /// Index into the request list.
     Req { idx: usize, depth: usize },
 }
@@ -42,7 +47,12 @@ struct Node {
 
 /// Folders first, then files, each alphabetical. `matched` limits which requests appear; when
 /// `filtering`, every folder holding a match is shown open regardless of `expanded`.
-pub fn build(reqs: &[RequestFile], matched: &[usize], expanded: &HashSet<String>, filtering: bool) -> Vec<Row> {
+pub fn build(
+    reqs: &[RequestFile],
+    matched: &[usize],
+    expanded: &HashSet<String>,
+    filtering: bool,
+) -> Vec<Row> {
     let mut root = Node::default();
     for &i in matched {
         let mut node = &mut root;
@@ -60,11 +70,27 @@ pub fn build(reqs: &[RequestFile], matched: &[usize], expanded: &HashSet<String>
     out
 }
 
-fn walk(node: &Node, prefix: &str, depth: usize, expanded: &HashSet<String>, filtering: bool, out: &mut Vec<Row>) {
+fn walk(
+    node: &Node,
+    prefix: &str,
+    depth: usize,
+    expanded: &HashSet<String>,
+    filtering: bool,
+    out: &mut Vec<Row>,
+) {
     for (name, child) in &node.dirs {
-        let path = if prefix.is_empty() { name.clone() } else { format!("{prefix}/{name}") };
+        let path = if prefix.is_empty() {
+            name.clone()
+        } else {
+            format!("{prefix}/{name}")
+        };
         let open = filtering || expanded.contains(&path);
-        out.push(Row::Dir { path: path.clone(), depth, open, count: child.count });
+        out.push(Row::Dir {
+            path: path.clone(),
+            depth,
+            open,
+            count: child.count,
+        });
         if open {
             walk(child, &path, depth + 1, expanded, filtering, out);
         }
@@ -75,7 +101,10 @@ fn walk(node: &Node, prefix: &str, depth: usize, expanded: &HashSet<String>, fil
 }
 
 pub fn flat(matched: &[usize]) -> Vec<Row> {
-    matched.iter().map(|&idx| Row::Req { idx, depth: 0 }).collect()
+    matched
+        .iter()
+        .map(|&idx| Row::Req { idx, depth: 0 })
+        .collect()
 }
 
 /// `a/b/c` → [`a`, `a/b`]: the folders that must be open for `rel` to show.
@@ -98,34 +127,73 @@ mod tests {
 
     fn reqs(rels: &[&str]) -> Vec<RequestFile> {
         rels.iter()
-            .map(|r| RequestFile { path: PathBuf::new(), rel: r.to_string(), title: None, entries: vec![] })
+            .map(|r| RequestFile {
+                path: PathBuf::new(),
+                rel: r.to_string(),
+                title: None,
+                entries: vec![],
+            })
             .collect()
     }
 
     fn render(reqs: &[RequestFile], rows: &[Row]) -> Vec<String> {
         rows.iter()
             .map(|r| match r {
-                Row::Dir { path, depth, open, count } => {
-                    format!("{}{} {}/ {count}", "  ".repeat(*depth), if *open { "v" } else { ">" }, basename(path))
+                Row::Dir {
+                    path,
+                    depth,
+                    open,
+                    count,
+                } => {
+                    format!(
+                        "{}{} {}/ {count}",
+                        "  ".repeat(*depth),
+                        if *open { "v" } else { ">" },
+                        basename(path)
+                    )
                 }
-                Row::Req { idx, depth } => format!("{}{}", "  ".repeat(*depth), basename(&reqs[*idx].rel)),
+                Row::Req { idx, depth } => {
+                    format!("{}{}", "  ".repeat(*depth), basename(&reqs[*idx].rel))
+                }
             })
             .collect()
     }
 
     #[test]
     fn folders_first_collapsed_and_filtered() {
-        let r = reqs(&["zeta", "job/create", "job/admin/purge", "auth/login", "alpha"]);
+        let r = reqs(&[
+            "zeta",
+            "job/create",
+            "job/admin/purge",
+            "auth/login",
+            "alpha",
+        ]);
         let all: Vec<usize> = (0..r.len()).collect();
-        assert_eq!(render(&r, &build(&r, &all, &HashSet::new(), false)), [
-            "> auth/ 1", "> job/ 2", "alpha", "zeta"
-        ]);
+        assert_eq!(
+            render(&r, &build(&r, &all, &HashSet::new(), false)),
+            ["> auth/ 1", "> job/ 2", "alpha", "zeta"]
+        );
         let open: HashSet<String> = ["job".into(), "job/admin".into()].into();
-        assert_eq!(render(&r, &build(&r, &all, &open, false)), [
-            "> auth/ 1", "v job/ 2", "  v admin/ 1", "    purge", "  create", "alpha", "zeta"
-        ]);
+        assert_eq!(
+            render(&r, &build(&r, &all, &open, false)),
+            [
+                "> auth/ 1",
+                "v job/ 2",
+                "  v admin/ 1",
+                "    purge",
+                "  create",
+                "alpha",
+                "zeta"
+            ]
+        );
         // A filter opens every folder on the way to a match and hides the rest.
-        assert_eq!(render(&r, &build(&r, &[2], &HashSet::new(), true)), ["v job/ 1", "  v admin/ 1", "    purge"]);
-        assert_eq!(ancestors("job/admin/purge").collect::<Vec<_>>(), ["job", "job/admin"]);
+        assert_eq!(
+            render(&r, &build(&r, &[2], &HashSet::new(), true)),
+            ["v job/ 1", "  v admin/ 1", "    purge"]
+        );
+        assert_eq!(
+            ancestors("job/admin/purge").collect::<Vec<_>>(),
+            ["job", "job/admin"]
+        );
     }
 }

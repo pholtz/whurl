@@ -18,7 +18,10 @@ fn path(ws: &Workspace) -> PathBuf {
 
 impl UiState {
     pub fn load(ws: &Workspace) -> Self {
-        std::fs::read_to_string(path(ws)).ok().and_then(|s| toml::from_str(&s).ok()).unwrap_or_default()
+        std::fs::read_to_string(path(ws))
+            .ok()
+            .and_then(|s| toml::from_str(&s).ok())
+            .unwrap_or_default()
     }
 
     pub fn save(&self, ws: &Workspace) {

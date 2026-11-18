@@ -37,7 +37,9 @@ struct ArgCmd {
 }
 
 fn vals(list: &[&str]) -> Vec<(String, String, bool)> {
-    list.iter().map(|v| (v.to_string(), String::new(), false)).collect()
+    list.iter()
+        .map(|v| (v.to_string(), String::new(), false))
+        .collect()
 }
 
 /// Commands with arguments. A name shared with the registry (e.g. `sidebar`) replaces it here;
@@ -51,11 +53,28 @@ static ARG_CMDS: &[ArgCmd] = &[
             if !args.is_empty() {
                 return vec![];
             }
-            a.envs.iter().map(|e| (e.clone(), if e == a.env() { "current".into() } else { String::new() }, false)).collect()
+            a.envs
+                .iter()
+                .map(|e| {
+                    (
+                        e.clone(),
+                        if e == a.env() {
+                            "current".into()
+                        } else {
+                            String::new()
+                        },
+                        false,
+                    )
+                })
+                .collect()
         },
         run: |a, args| {
             let [name] = args else { return usage("env") };
-            let i = a.envs.iter().position(|e| e == name).ok_or_else(|| format!("no env {name}; one of {}", a.envs.join(", ")))?;
+            let i = a
+                .envs
+                .iter()
+                .position(|e| e == name)
+                .ok_or_else(|| format!("no env {name}; one of {}", a.envs.join(", ")))?;
             a.env = i;
             a.on_select();
             Ok(a.say(format!("env {name}"), false))
@@ -79,7 +98,13 @@ static ARG_CMDS: &[ArgCmd] = &[
         name: "export",
         usage: "md|json",
         desc: "export the run to .whurl/exports",
-        complete: |_, args, _| if args.is_empty() { vals(&["md", "json"]) } else { vec![] },
+        complete: |_, args, _| {
+            if args.is_empty() {
+                vals(&["md", "json"])
+            } else {
+                vec![]
+            }
+        },
         run: |a, args| match args {
             ["md"] => Ok(a.export(false)),
             ["json"] => Ok(a.export(true)),
@@ -90,7 +115,13 @@ static ARG_CMDS: &[ArgCmd] = &[
         name: "sidebar",
         usage: "[tree|flat|hidden]",
         desc: "sidebar style for this session; no argument flips tree ↔ flat",
-        complete: |_, args, _| if args.is_empty() { vals(&["tree", "flat", "hidden"]) } else { vec![] },
+        complete: |_, args, _| {
+            if args.is_empty() {
+                vals(&["tree", "flat", "hidden"])
+            } else {
+                vec![]
+            }
+        },
         run: |a, args| match args {
             [] => Ok(a.toggle_sidebar()),
             [s] => settings::set(a, "ui.sidebar", Some(s), false),
@@ -101,10 +132,19 @@ static ARG_CMDS: &[ArgCmd] = &[
         name: "tab",
         usage: "request|response|meta|source",
         desc: "switch tab",
-        complete: |_, args, _| if args.is_empty() { vals(&["request", "response", "meta", "source"]) } else { vec![] },
+        complete: |_, args, _| {
+            if args.is_empty() {
+                vals(&["request", "response", "meta", "source"])
+            } else {
+                vec![]
+            }
+        },
         run: |a, args| {
             let [name] = args else { return usage("tab") };
-            let tab = TABS.into_iter().find(|t| t.title().eq_ignore_ascii_case(name)).ok_or("no such tab")?;
+            let tab = TABS
+                .into_iter()
+                .find(|t| t.title().eq_ignore_ascii_case(name))
+                .ok_or("no such tab")?;
             Ok(a.set_tab(tab))
         },
     },
@@ -112,7 +152,13 @@ static ARG_CMDS: &[ArgCmd] = &[
         name: "asserts",
         usage: "[on|off]",
         desc: "asserts for this session; no argument toggles",
-        complete: |_, args, _| if args.is_empty() { vals(&["on", "off"]) } else { vec![] },
+        complete: |_, args, _| {
+            if args.is_empty() {
+                vals(&["on", "off"])
+            } else {
+                vec![]
+            }
+        },
         run: |a, args| match args {
             [] => Ok(a.toggle_asserts()),
             [v] => settings::set(a, "run.asserts", Some(v), false),
@@ -123,7 +169,13 @@ static ARG_CMDS: &[ArgCmd] = &[
         name: "wrap",
         usage: "[on|off]",
         desc: "line wrap for this session; no argument toggles",
-        complete: |_, args, _| if args.is_empty() { vals(&["on", "off"]) } else { vec![] },
+        complete: |_, args, _| {
+            if args.is_empty() {
+                vals(&["on", "off"])
+            } else {
+                vec![]
+            }
+        },
         run: |a, args| match args {
             [] => Ok(a.toggle_wrap()),
             [v] => settings::set(a, "ui.wrap", Some(v), false),
@@ -167,10 +219,19 @@ static ARG_CMDS: &[ArgCmd] = &[
         name: "cancel",
         usage: "[all]",
         desc: "cancel the selected request's run, or every run",
-        complete: |_, args, _| if args.is_empty() { vals(&["all"]) } else { vec![] },
+        complete: |_, args, _| {
+            if args.is_empty() {
+                vals(&["all"])
+            } else {
+                vec![]
+            }
+        },
         run: |a, args| match args {
             [] => {
-                let job = a.key().and_then(|k| a.running.remove(&k)).ok_or("nothing running here")?;
+                let job = a
+                    .key()
+                    .and_then(|k| a.running.remove(&k))
+                    .ok_or("nothing running here")?;
                 job.cancel();
                 a.view = None;
                 Ok(a.say("cancelled", false))
@@ -193,7 +254,10 @@ const FREE_TEXT: &[&str] = &["new", "rename", "duplicate"];
 const ALIASES: &[(&str, &str)] = &[("q", "quit"), ("open", "edit"), ("history", "tab-meta")];
 
 fn usage(name: &str) -> Result<(), String> {
-    let c = ARG_CMDS.iter().find(|c| c.name == name).expect("known command");
+    let c = ARG_CMDS
+        .iter()
+        .find(|c| c.name == name)
+        .expect("known command");
     Err(format!("usage: :{} {}", c.name, c.usage))
 }
 
@@ -201,9 +265,18 @@ fn complete_set(app: &App, args: &[&str], partial: &str) -> Vec<(String, String,
     match args {
         [] => settings::KEYS
             .iter()
-            .map(|(k, v)| (k.to_string(), format!("{v} · now {}", settings::get(app, k).unwrap_or_default()), true))
+            .map(|(k, v)| {
+                (
+                    k.to_string(),
+                    format!("{v} · now {}", settings::get(app, k).unwrap_or_default()),
+                    true,
+                )
+            })
             .collect(),
-        [key] => settings::values(app, key, partial).into_iter().map(|v| (v, String::new(), false)).collect(),
+        [key] => settings::values(app, key, partial)
+            .into_iter()
+            .map(|v| (v, String::new(), false))
+            .collect(),
         _ => vec![],
     }
 }
@@ -213,15 +286,23 @@ fn complete_dirs(app: &App, args: &[&str], _: &str) -> Vec<(String, String, bool
     if !args.is_empty() {
         return vec![];
     }
-    let mut dirs: Vec<&str> = app.requests.iter().flat_map(|r| super::tree::ancestors(&r.rel)).collect();
+    let mut dirs: Vec<&str> = app
+        .requests
+        .iter()
+        .flat_map(|r| super::tree::ancestors(&r.rel))
+        .collect();
     dirs.sort_unstable();
     dirs.dedup();
-    dirs.into_iter().map(|d| (format!("{d}/"), String::new(), false)).collect()
+    dirs.into_iter()
+        .map(|d| (format!("{d}/"), String::new(), false))
+        .collect()
 }
 
 fn set(app: &mut App, args: &[&str], persist: bool) -> Result<(), String> {
     let name = if persist { "set!" } else { "set" };
-    let Some((key, rest)) = args.split_first() else { return usage(name) };
+    let Some((key, rest)) = args.split_first() else {
+        return usage(name);
+    };
     let value = (!rest.is_empty()).then(|| rest.join(" "));
     settings::set(app, key, value.as_deref(), persist)
 }
@@ -231,19 +312,30 @@ pub fn open(app: &mut App) {
 }
 
 pub fn open_with(app: &mut App, input: &str) {
-    app.cmdline = CmdLine { input: input.into(), sel: 0 };
+    app.cmdline = CmdLine {
+        input: input.into(),
+        sel: 0,
+    };
     app.mode = Mode::Command;
 }
 
 /// Finished words, and the partial one being typed (empty after a space).
 fn words(input: &str) -> (Vec<&str>, &str) {
     let mut w: Vec<&str> = input.split_whitespace().collect();
-    let partial = if input.ends_with(char::is_whitespace) { "" } else { w.pop().unwrap_or("") };
+    let partial = if input.ends_with(char::is_whitespace) {
+        ""
+    } else {
+        w.pop().unwrap_or("")
+    };
     (w, partial)
 }
 
 fn keys_of(id: &str) -> String {
-    COMMANDS.iter().find(|c| c.id == id && !c.keys.is_empty()).map(|c| c.key_labels()).unwrap_or_default()
+    COMMANDS
+        .iter()
+        .find(|c| c.id == id && !c.keys.is_empty())
+        .map(|c| c.key_labels())
+        .unwrap_or_default()
 }
 
 pub fn completions(app: &App) -> Vec<Cand> {
@@ -257,13 +349,16 @@ pub fn completions(app: &App) -> Vec<Cand> {
                 keys: keys_of(c.name),
                 more: true,
             });
-            let reg = COMMANDS.iter().filter(|c| !ARG_CMDS.iter().any(|a| a.name == c.id)).map(|c| Cand {
-                text: c.id.into(),
-                usage: "",
-                desc: c.desc.into(),
-                keys: keys_of(c.id),
-                more: false,
-            });
+            let reg = COMMANDS
+                .iter()
+                .filter(|c| !ARG_CMDS.iter().any(|a| a.name == c.id))
+                .map(|c| Cand {
+                    text: c.id.into(),
+                    usage: "",
+                    desc: c.desc.into(),
+                    keys: keys_of(c.id),
+                    more: false,
+                });
             let aliases = ALIASES.iter().map(|(a, id)| Cand {
                 text: a.to_string(),
                 usage: "",
@@ -276,7 +371,13 @@ pub fn completions(app: &App) -> Vec<Cand> {
         Some((name, args)) => match ARG_CMDS.iter().find(|c| c.name == *name) {
             Some(c) => (c.complete)(app, args, partial)
                 .into_iter()
-                .map(|(text, desc, more)| Cand { text, usage: "", desc, keys: String::new(), more })
+                .map(|(text, desc, more)| Cand {
+                    text,
+                    usage: "",
+                    desc,
+                    keys: String::new(),
+                    more,
+                })
                 .collect(),
             None => vec![],
         },
@@ -307,7 +408,9 @@ pub fn move_sel(app: &mut App, delta: isize) {
 /// Tab: replace the partial word with the highlighted completion.
 pub fn accept(app: &mut App) {
     let cands = completions(app);
-    let Some(c) = cands.get(app.cmdline.sel) else { return };
+    let Some(c) = cands.get(app.cmdline.sel) else {
+        return;
+    };
     let (_, partial) = words(&app.cmdline.input);
     let keep = app.cmdline.input.len() - partial.len();
     app.cmdline.input.truncate(keep);

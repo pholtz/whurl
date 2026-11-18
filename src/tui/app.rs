@@ -1,21 +1,21 @@
 //! TUI state and the actions commands call.
 
+use super::cmdline::CmdLine;
+use super::help::Help;
+use super::jobs::{Job, Msg, Outcome};
+use super::state::UiState;
+use super::tree::{self, Row, Sel};
 use crate::config::Config;
+use crate::config::SidebarStyle;
 use crate::run::{Entry, Run, RunOpts};
 use crate::store;
-use crate::workspace::{search, RequestFile, Workspace};
+use crate::workspace::{RequestFile, Workspace, search};
 use ratatui::layout::Rect;
 use ratatui::text::Line;
 use ratatui::widgets::ListState;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use super::jobs::{Job, Msg, Outcome};
-use super::help::Help;
-use super::cmdline::CmdLine;
-use super::state::UiState;
-use super::tree::{self, Row, Sel};
-use crate::config::SidebarStyle;
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Instant;
 
 pub const HISTORY: usize = 30;
@@ -158,7 +158,12 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(ws: Workspace, cfg: Config, query: Option<String>, env: String) -> anyhow::Result<Self> {
+    pub fn new(
+        ws: Workspace,
+        cfg: Config,
+        query: Option<String>,
+        env: String,
+    ) -> anyhow::Result<Self> {
         let requests = ws.requests()?;
         let envs = ws.envs();
         let env = envs.iter().position(|e| *e == env).unwrap_or(0);
@@ -185,7 +190,11 @@ impl App {
             env,
             mode: Mode::Normal,
             help: Help::default(),
-            focus: if cfg_hidden { Focus::Main } else { Focus::Sidebar },
+            focus: if cfg_hidden {
+                Focus::Main
+            } else {
+                Focus::Sidebar
+            },
             tab: Tab::Request,
             entry: 0,
             scroll: (0, 0),
@@ -209,7 +218,11 @@ impl App {
             quit: false,
         };
         app.matched = search(&app.requests, &app.filter);
-        let keep = if app.filter.is_empty() { st.selected.map(Sel::Req) } else { app.best() };
+        let keep = if app.filter.is_empty() {
+            st.selected.map(Sel::Req)
+        } else {
+            app.best()
+        };
         app.rebuild(keep, true);
         app.on_select();
         app.leave_folder();
@@ -219,7 +232,10 @@ impl App {
     // ---- queries -------------------------------------------------------------------------
 
     pub fn env(&self) -> &str {
-        self.envs.get(self.env).map(String::as_str).unwrap_or("local")
+        self.envs
+            .get(self.env)
+            .map(String::as_str)
+            .unwrap_or("local")
     }
 
     pub fn row(&self) -> Option<&Row> {
@@ -239,7 +255,9 @@ impl App {
     }
 
     fn best(&self) -> Option<Sel> {
-        self.matched.first().map(|&i| Sel::Req(self.requests[i].rel.clone()))
+        self.matched
+            .first()
+            .map(|&i| Sel::Req(self.requests[i].rel.clone()))
     }
 
     pub fn filtering(&self) -> bool {
@@ -247,11 +265,14 @@ impl App {
     }
 
     pub fn key(&self) -> Option<Key> {
-        self.current().map(|r| (r.rel.clone(), self.env().to_string()))
+        self.current()
+            .map(|r| (r.rel.clone(), self.env().to_string()))
     }
 
     pub fn current_run(&self) -> Option<&Run> {
-        self.key().and_then(|k| self.runs.get(&k)).and_then(Option::as_ref)
+        self.key()
+            .and_then(|k| self.runs.get(&k))
+            .and_then(Option::as_ref)
     }
 
     pub fn current_entry(&self) -> Option<&Entry> {
@@ -268,11 +289,20 @@ impl App {
     /// above a request that is hidden; otherwise the selection falls back to its nearest
     /// visible folder.
     fn rebuild(&mut self, keep: Option<Sel>, reveal: bool) {
-        if reveal && self.tree && !self.filtering() && let Some(Sel::Req(rel)) = &keep {
+        if reveal
+            && self.tree
+            && !self.filtering()
+            && let Some(Sel::Req(rel)) = &keep
+        {
             self.expanded.extend(tree::ancestors(rel).map(String::from));
         }
         self.rows = if self.tree {
-            tree::build(&self.requests, &self.matched, &self.expanded, self.filtering())
+            tree::build(
+                &self.requests,
+                &self.matched,
+                &self.expanded,
+                self.filtering(),
+            )
         } else {
             tree::flat(&self.matched)
         };
@@ -287,7 +317,11 @@ impl App {
                 dirs.into_iter().find_map(|d| find(&Sel::Dir(d.into())))
             })
         });
-        self.list.select(if self.rows.is_empty() { None } else { Some(idx.unwrap_or(0)) });
+        self.list.select(if self.rows.is_empty() {
+            None
+        } else {
+            Some(idx.unwrap_or(0))
+        });
     }
 
     /// Rebuild rows keeping the selection, and reset the view only if the selection changed.
@@ -333,9 +367,14 @@ impl App {
         self.view = None;
         let Some(key) = self.key() else { return };
         if !self.runs.contains_key(&key) {
-            let latest = store::ids_for(&self.ws, &key.0, Some(&key.1)).first().and_then(|id| store::load(&self.ws, id).ok());
+            let latest = store::ids_for(&self.ws, &key.0, Some(&key.1))
+                .first()
+                .and_then(|id| store::load(&self.ws, id).ok());
             self.runs.insert(key.clone(), latest);
-            self.latencies.insert(key.clone(), store::latencies(&self.ws, &key.0, &key.1, HISTORY));
+            self.latencies.insert(
+                key.clone(),
+                store::latencies(&self.ws, &key.0, &key.1, HISTORY),
+            );
         }
         self.entry = self.current_run().map(Run::primary_index).unwrap_or(0);
     }
@@ -346,7 +385,8 @@ impl App {
         }
         let n = self.rows.len() as isize;
         let cur = self.list.selected().unwrap_or(0) as isize;
-        self.list.select(Some((cur + delta).clamp(0, n - 1) as usize));
+        self.list
+            .select(Some((cur + delta).clamp(0, n - 1) as usize));
         self.on_select();
     }
 
@@ -381,13 +421,14 @@ impl App {
         self.content_height.max(2) as isize
     }
 
-/// Sidebar rows visible in the last frame.
+    /// Sidebar rows visible in the last frame.
     pub fn list_page(&self) -> isize {
         (self.hits.list.height as isize).max(2)
     }
 
     pub fn scroll_by(&mut self, delta: isize) {
-        self.scroll.0 = (self.scroll.0 as isize + delta).clamp(0, self.max_scroll() as isize) as usize;
+        self.scroll.0 =
+            (self.scroll.0 as isize + delta).clamp(0, self.max_scroll() as isize) as usize;
     }
 
     /// Only meaningful with wrap off.
@@ -401,7 +442,10 @@ impl App {
     pub fn toggle_wrap(&mut self) {
         self.wrap = !self.wrap;
         self.scroll.1 = 0;
-        self.say(format!("wrap {}", if self.wrap { "on" } else { "off" }), false);
+        self.say(
+            format!("wrap {}", if self.wrap { "on" } else { "off" }),
+            false,
+        );
     }
 
     // ---- actions -------------------------------------------------------------------------
@@ -429,7 +473,13 @@ impl App {
         if let Some(job) = self.key().and_then(|k| self.running.remove(&k)) {
             job.cancel();
             self.view = None;
-            self.say(format!("cancelled {}", self.current().map(|r| r.rel.as_str()).unwrap_or("")), false);
+            self.say(
+                format!(
+                    "cancelled {}",
+                    self.current().map(|r| r.rel.as_str()).unwrap_or("")
+                ),
+                false,
+            );
         } else if !self.filter.is_empty() {
             self.filter.clear();
             self.refilter(false);
@@ -438,21 +488,37 @@ impl App {
 
     pub fn toggle_asserts(&mut self) {
         self.asserts = !self.asserts;
-        self.say(format!("asserts {}", if self.asserts { "on" } else { "off" }), false);
+        self.say(
+            format!("asserts {}", if self.asserts { "on" } else { "off" }),
+            false,
+        );
     }
 
     pub fn start_run(&mut self) {
         if let Some(Row::Dir { .. }) = self.row() {
             return self.toggle_dir();
         }
-        let Some(req) = self.current().cloned() else { return };
+        let Some(req) = self.current().cloned() else {
+            return;
+        };
         let key = (req.rel.clone(), self.env().to_string());
         if self.running.contains_key(&key) {
             return self.say("already running · esc to cancel", false);
         }
-        let opts = RunOpts { env: key.1.clone(), asserts: self.asserts, extra_args: vec![] };
+        let opts = RunOpts {
+            env: key.1.clone(),
+            asserts: self.asserts,
+            extra_args: vec![],
+        };
         self.next_job += 1;
-        let job = Job::start(self.next_job, key.clone(), &self.ws, req, opts, self.tx.clone());
+        let job = Job::start(
+            self.next_job,
+            key.clone(),
+            &self.ws,
+            req,
+            opts,
+            self.tx.clone(),
+        );
         self.running.insert(key, job);
         self.view = None;
     }
@@ -517,9 +583,13 @@ impl App {
 
     /// ← / h: close an open folder, else jump to the parent folder.
     pub fn collapse(&mut self) {
-        let Some(row) = self.row().cloned() else { return };
+        let Some(row) = self.row().cloned() else {
+            return;
+        };
         let path = match &row {
-            Row::Dir { path, open: true, .. } if !self.filtering() => return self.set_open(path, false),
+            Row::Dir {
+                path, open: true, ..
+            } if !self.filtering() => return self.set_open(path, false),
             Row::Dir { path, .. } => path.clone(),
             Row::Req { idx, .. } => self.requests[*idx].rel.clone(),
         };
@@ -535,14 +605,21 @@ impl App {
     /// → / l: open a closed folder, else step into it.
     pub fn expand(&mut self) {
         match self.row().cloned() {
-            Some(Row::Dir { path, open: false, .. }) if !self.filtering() => self.set_open(&path, true),
+            Some(Row::Dir {
+                path, open: false, ..
+            }) if !self.filtering() => self.set_open(&path, true),
             Some(Row::Dir { .. }) => self.move_sel(1),
             _ => {}
         }
     }
 
     pub fn expand_all(&mut self) {
-        self.expanded = self.requests.iter().flat_map(|r| tree::ancestors(&r.rel)).map(String::from).collect();
+        self.expanded = self
+            .requests
+            .iter()
+            .flat_map(|r| tree::ancestors(&r.rel))
+            .map(String::from)
+            .collect();
         self.rebuild_keep(false);
         self.save_state();
     }
@@ -556,13 +633,20 @@ impl App {
     pub fn toggle_sidebar(&mut self) {
         self.tree = !self.tree;
         self.rebuild_keep(true);
-        self.say(format!("sidebar: {}", if self.tree { "tree" } else { "flat" }), false);
+        self.say(
+            format!("sidebar: {}", if self.tree { "tree" } else { "flat" }),
+            false,
+        );
     }
 
     /// `\`: hide or show the sidebar for this session (config sets the startup default).
     pub fn toggle_sidebar_visible(&mut self) {
         self.show_sidebar = !self.show_sidebar;
-        self.focus = if self.show_sidebar { Focus::Sidebar } else { Focus::Main };
+        self.focus = if self.show_sidebar {
+            Focus::Sidebar
+        } else {
+            Focus::Main
+        };
         self.rebuild_keep(true);
         self.leave_folder();
     }
@@ -586,10 +670,16 @@ impl App {
         if self.show_sidebar {
             return;
         }
-        let Some(Row::Dir { path, .. }) = self.row().cloned() else { return };
+        let Some(Row::Dir { path, .. }) = self.row().cloned() else {
+            return;
+        };
         let prefix = format!("{path}/");
-        let mut inside: Vec<&String> =
-            self.matched.iter().map(|&i| &self.requests[i].rel).filter(|r| r.starts_with(&prefix)).collect();
+        let mut inside: Vec<&String> = self
+            .matched
+            .iter()
+            .map(|&i| &self.requests[i].rel)
+            .filter(|r| r.starts_with(&prefix))
+            .collect();
         inside.sort();
         if let Some(rel) = inside.first().map(|r| r.to_string()) {
             self.rebuild(Some(Sel::Req(rel)), true);
@@ -603,7 +693,14 @@ impl App {
         let cur = self.current().map(|r| r.rel.clone());
         self.picker = Picker::default();
         self.picker.results = search(&self.requests, "");
-        self.picker.sel = cur.and_then(|c| self.picker.results.iter().position(|&i| self.requests[i].rel == c)).unwrap_or(0);
+        self.picker.sel = cur
+            .and_then(|c| {
+                self.picker
+                    .results
+                    .iter()
+                    .position(|&i| self.requests[i].rel == c)
+            })
+            .unwrap_or(0);
         self.mode = Mode::Picker;
     }
 
@@ -621,7 +718,9 @@ impl App {
 
     pub fn picker_choose(&mut self) {
         self.mode = Mode::Normal;
-        let Some(&idx) = self.picker.results.get(self.picker.sel) else { return };
+        let Some(&idx) = self.picker.results.get(self.picker.sel) else {
+            return;
+        };
         let rel = self.requests[idx].rel.clone();
         self.select_rel(&rel);
     }
@@ -639,7 +738,11 @@ impl App {
     fn save_state(&self) {
         let mut expanded: Vec<String> = self.expanded.iter().cloned().collect();
         expanded.sort();
-        UiState { expanded, selected: self.current().map(|r| r.rel.clone()) }.save(&self.ws);
+        UiState {
+            expanded,
+            selected: self.current().map(|r| r.rel.clone()),
+        }
+        .save(&self.ws);
     }
 
     /// Kill every in-flight hurl before exiting.
@@ -671,15 +774,24 @@ impl App {
     /// The body `v` and `y` act on: the request body on the Request tab, else the response
     /// body, pretty-printed (already redacted), with an extension for its type.
     fn tab_body(&self) -> Result<TabBody, String> {
-        let e = self.current_entry().ok_or("no run yet: press enter first")?;
+        let e = self
+            .current_entry()
+            .ok_or("no run yet: press enter first")?;
         let (body, headers, what) = match (self.tab, &e.response) {
             (Tab::Request, _) => (e.request.body.as_deref(), &e.request.headers, "request"),
-            (_, Some(r)) if r.binary => return Err("binary response body: export it instead".into()),
+            (_, Some(r)) if r.binary => {
+                return Err("binary response body: export it instead".into());
+            }
             (_, Some(r)) => (r.body.as_deref(), &r.headers, "response"),
             (_, None) => return Err("no response".into()),
         };
-        let body = body.filter(|b| !b.is_empty()).ok_or_else(|| format!("empty {what} body"))?;
-        let ctype = headers.iter().find(|h| h.name.eq_ignore_ascii_case("content-type")).map(|h| h.value.as_str());
+        let body = body
+            .filter(|b| !b.is_empty())
+            .ok_or_else(|| format!("empty {what} body"))?;
+        let ctype = headers
+            .iter()
+            .find(|h| h.name.eq_ignore_ascii_case("content-type"))
+            .map(|h| h.value.as_str());
         Ok(TabBody {
             text: crate::export::pretty(body),
             ext: extension(ctype, body),
@@ -695,8 +807,12 @@ impl App {
             Err(e) => return self.say(e, true),
         };
         // tempfile creates it 0600; it is removed when dropped after the viewer exits.
-        let file = tempfile::Builder::new().prefix("whurl-").suffix(&format!(".{}", b.ext)).tempfile();
-        match file.and_then(|mut f| std::io::Write::write_all(&mut f, b.text.as_bytes()).map(|_| f)) {
+        let file = tempfile::Builder::new()
+            .prefix("whurl-")
+            .suffix(&format!(".{}", b.ext))
+            .tempfile();
+        match file.and_then(|mut f| std::io::Write::write_all(&mut f, b.text.as_bytes()).map(|_| f))
+        {
             Ok(f) => {
                 if b.truncated {
                     self.say("the stored body was truncated", true);
@@ -716,8 +832,15 @@ impl App {
         match super::clipboard::copy(&b.text) {
             Ok(via) => {
                 let size = crate::export::bytes(b.text.len() as u64);
-                let note = if b.truncated { " (truncated when stored)" } else { "" };
-                self.say(format!("copied {} body, {size}{note}{via}", b.what), b.truncated);
+                let note = if b.truncated {
+                    " (truncated when stored)"
+                } else {
+                    ""
+                };
+                self.say(
+                    format!("copied {} body, {size}{note}{via}", b.what),
+                    b.truncated,
+                );
             }
             Err(e) => self.say(format!("copy failed: {e}"), true),
         }
@@ -752,7 +875,11 @@ impl App {
 
     /// Run `id` only if it was asked for twice within a few seconds.
     fn confirmed(&mut self, id: String, prompt: String) -> bool {
-        if self.confirm.take().is_some_and(|(c, at)| c == id && at.elapsed().as_secs() < 5) {
+        if self
+            .confirm
+            .take()
+            .is_some_and(|(c, at)| c == id && at.elapsed().as_secs() < 5)
+        {
             return true;
         }
         self.confirm = Some((id, Instant::now()));
@@ -766,7 +893,10 @@ impl App {
         if n == 0 {
             return self.say("no history to clear", false);
         }
-        if !self.confirmed("clear-history".into(), format!("delete all {n} stored runs? press C (or :clear-history) again")) {
+        if !self.confirmed(
+            "clear-history".into(),
+            format!("delete all {n} stored runs? press C (or :clear-history) again"),
+        ) {
             return;
         }
         match store::clear(&self.ws) {
@@ -785,7 +915,9 @@ impl App {
             Some(Row::Req { idx, .. }) => &self.requests[*idx].rel,
             None => return String::new(),
         };
-        tree::parent(path).map(|p| format!("{p}/")).unwrap_or_default()
+        tree::parent(path)
+            .map(|p| format!("{p}/"))
+            .unwrap_or_default()
     }
 
     /// `a`: the `:` bar, ready for a name in the current folder.
@@ -812,7 +944,10 @@ impl App {
 
     /// Copy the selected request to `requests/<name>.hurl`, select it, and open it in the editor.
     pub fn duplicate_request(&mut self, name: &str) -> Result<(), String> {
-        let req = self.current().cloned().ok_or("select a request to duplicate")?;
+        let req = self
+            .current()
+            .cloned()
+            .ok_or("select a request to duplicate")?;
         let rel = request_name(name)?;
         let path = self.ws.requests_dir().join(format!("{rel}.hurl"));
         if path.exists() {
@@ -835,7 +970,13 @@ impl App {
         if self.running.keys().any(|(r, _)| *r == req.rel) {
             return self.say(format!("{} is running", req.rel), true);
         }
-        if !self.confirmed(format!("delete {}", req.rel), format!("delete {} and its history? press D (or :delete) again", req.rel)) {
+        if !self.confirmed(
+            format!("delete {}", req.rel),
+            format!(
+                "delete {} and its history? press D (or :delete) again",
+                req.rel
+            ),
+        ) {
             return;
         }
         if let Err(e) = std::fs::remove_file(&req.path) {
@@ -855,7 +996,10 @@ impl App {
         self.save_state();
         match removed {
             Ok(_) => self.say(format!("deleted {}", req.rel), false),
-            Err(e) => self.say(format!("deleted {}, but not its history: {e}", req.rel), true),
+            Err(e) => self.say(
+                format!("deleted {}, but not its history: {e}", req.rel),
+                true,
+            ),
         }
     }
 
@@ -878,7 +1022,12 @@ impl App {
         let base = self
             .current()
             .and_then(|r| r.primary())
-            .and_then(|e| e.url.starts_with("{{").then(|| e.url.find("}}").map(|i| e.url[..i + 2].to_string())).flatten())
+            .and_then(|e| {
+                e.url
+                    .starts_with("{{")
+                    .then(|| e.url.find("}}").map(|i| e.url[..i + 2].to_string()))
+                    .flatten()
+            })
             .unwrap_or_else(|| "https://example.com".into());
         let stub = format!("# {}\nGET {base}/\n", tree::basename(&rel));
         std::fs::create_dir_all(path.parent().unwrap_or(&path))
@@ -893,7 +1042,10 @@ impl App {
 
     /// Rename (or move) the selected request, taking its run history along.
     pub fn rename_request(&mut self, name: &str) -> Result<(), String> {
-        let req = self.current().cloned().ok_or("select a request to rename")?;
+        let req = self
+            .current()
+            .cloned()
+            .ok_or("select a request to rename")?;
         let rel = request_name(name)?;
         if rel == req.rel {
             return Ok(());
@@ -917,12 +1069,25 @@ impl App {
         self.select_rel(&rel);
         self.save_state();
         match moved {
-            Ok(n) => self.say(format!("renamed {} → {rel}{}", req.rel, match n {
-                    0 => String::new(),
-                    1 => ", 1 run moved".into(),
-                    n => format!(", {n} runs moved"),
-                }), false),
-            Err(e) => self.say(format!("renamed {} → {rel}, but history was not moved: {e}", req.rel), true),
+            Ok(n) => self.say(
+                format!(
+                    "renamed {} → {rel}{}",
+                    req.rel,
+                    match n {
+                        0 => String::new(),
+                        1 => ", 1 run moved".into(),
+                        n => format!(", {n} runs moved"),
+                    }
+                ),
+                false,
+            ),
+            Err(e) => self.say(
+                format!(
+                    "renamed {} → {rel}, but history was not moved: {e}",
+                    req.rel
+                ),
+                true,
+            ),
         }
         Ok(())
     }
@@ -940,7 +1105,9 @@ fn request_name(input: &str) -> Result<String, String> {
     let s = s.strip_suffix(".hurl").unwrap_or(s);
     let ok = |p: &str| !p.is_empty() && p != "." && p != ".." && !p.starts_with('.');
     if s.is_empty() || !s.split('/').all(ok) || s.contains(char::is_whitespace) {
-        return Err(format!("not a request name: '{input}' (want e.g. folder/name)"));
+        return Err(format!(
+            "not a request name: '{input}' (want e.g. folder/name)"
+        ));
     }
     Ok(s.to_string())
 }
@@ -958,10 +1125,20 @@ fn viewer_command(configured: &str) -> String {
     if !configured.trim().is_empty() {
         return configured.to_string();
     }
-    let Some(ed) = std::env::var("VISUAL").or_else(|_| std::env::var("EDITOR")).ok().filter(|e| !e.trim().is_empty()) else {
+    let Some(ed) = std::env::var("VISUAL")
+        .or_else(|_| std::env::var("EDITOR"))
+        .ok()
+        .filter(|e| !e.trim().is_empty())
+    else {
         return "less".into();
     };
-    let bin = ed.split_whitespace().next().unwrap_or_default().rsplit('/').next().unwrap_or_default();
+    let bin = ed
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .rsplit('/')
+        .next()
+        .unwrap_or_default();
     match bin {
         "vi" | "vim" | "nvim" | "view" | "gvim" | "mvim" => format!("{ed} -R"),
         "nano" => format!("{ed} -v"),
@@ -994,7 +1171,11 @@ fn extension(ctype: Option<&str>, body: &str) -> &'static str {
 fn summary_text(r: &Run) -> String {
     match r.primary() {
         Some(e) => match &e.response {
-            Some(resp) => format!("{} in {}", resp.status, e.total_us().map(crate::export::ms).unwrap_or_default()),
+            Some(resp) => format!(
+                "{} in {}",
+                resp.status,
+                e.total_us().map(crate::export::ms).unwrap_or_default()
+            ),
             None => "no response".into(),
         },
         None => "no entries".into(),

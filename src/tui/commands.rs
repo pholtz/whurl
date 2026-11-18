@@ -59,7 +59,11 @@ impl Bind {
             KeyCode::Char(c) => c.to_string(),
             other => format!("{other:?}").to_lowercase(),
         };
-        if self.1.contains(KeyModifiers::CONTROL) { format!("ctrl-{base}") } else { base }
+        if self.1.contains(KeyModifiers::CONTROL) {
+            format!("ctrl-{base}")
+        } else {
+            base
+        }
     }
 }
 
@@ -77,7 +81,11 @@ impl Command {
         if self.keys.is_empty() {
             return format!(":{}", self.id);
         }
-        self.keys.iter().map(Bind::label).collect::<Vec<_>>().join(" ")
+        self.keys
+            .iter()
+            .map(Bind::label)
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 }
 
@@ -91,67 +99,330 @@ macro_rules! cmd {
 }
 
 pub static COMMANDS: &[Command] = &[
-    cmd!("run", Global, [code(K::Enter), k('r')], "run the selected request", |a| a.start_run()),
-    cmd!("escape", Global, [code(K::Esc)], "cancel the selected run, else clear the filter", |a| a.escape()),
-    cmd!("focus", Global, [code(K::Tab), code(K::BackTab)], "switch focus: sidebar ↔ main", |a| a.toggle_focus()),
-    cmd!("filter", Global, [k('/')], "filter requests (find, with the sidebar hidden)", |a| a.open_filter()),
-    cmd!("find", Global, [ctrl('p')], "find a request: fuzzy picker", |a| a.open_picker()),
-    cmd!("sidebar-toggle", Global, [k('\\')], "hide/show the sidebar", |a| a.toggle_sidebar_visible()),
+    cmd!(
+        "run",
+        Global,
+        [code(K::Enter), k('r')],
+        "run the selected request",
+        |a| a.start_run()
+    ),
+    cmd!(
+        "escape",
+        Global,
+        [code(K::Esc)],
+        "cancel the selected run, else clear the filter",
+        |a| a.escape()
+    ),
+    cmd!(
+        "focus",
+        Global,
+        [code(K::Tab), code(K::BackTab)],
+        "switch focus: sidebar ↔ main",
+        |a| a.toggle_focus()
+    ),
+    cmd!(
+        "filter",
+        Global,
+        [k('/')],
+        "filter requests (find, with the sidebar hidden)",
+        |a| a.open_filter()
+    ),
+    cmd!(
+        "find",
+        Global,
+        [ctrl('p')],
+        "find a request: fuzzy picker",
+        |a| a.open_picker()
+    ),
+    cmd!(
+        "sidebar-toggle",
+        Global,
+        [k('\\')],
+        "hide/show the sidebar",
+        |a| a.toggle_sidebar_visible()
+    ),
     cmd!("env-next", Global, [k('e')], "next env", |a| a.cycle_env(1)),
-    cmd!("env-prev", Global, [k('E')], "previous env", |a| a.cycle_env(-1)),
-    cmd!("asserts", Global, [k('t')], "toggle asserts", |a| a.toggle_asserts()),
-    cmd!("tab-request", Global, [k('1')], "Request tab", |a| a.set_tab(Tab::Request)),
-    cmd!("tab-response", Global, [k('2')], "Response tab", |a| a.set_tab(Tab::Response)),
-    cmd!("tab-meta", Global, [k('3')], "Meta tab: timing, history, asserts, captures", |a| a.set_tab(Tab::Meta)),
-    cmd!("tab-source", Global, [k('4')], "Source tab", |a| a.set_tab(Tab::Source)),
-    cmd!("wrap", Global, [k('w')], "toggle line wrap", |a| a.toggle_wrap()),
-    cmd!("entry-next", Global, [k(']')], "next entry in a chained file", |a| a.cycle_entry(1)),
-    cmd!("entry-prev", Global, [k('[')], "previous entry in a chained file", |a| a.cycle_entry(-1)),
-    cmd!("export-md", Global, [k('x')], "export run as Markdown to .whurl/exports", |a| a.export(false)),
-    cmd!("export-json", Global, [k('X')], "export run as JSON to .whurl/exports", |a| a.export(true)),
-    cmd!("view", Global, [k('v')], "view the body in viewer.command ($EDITOR -R, less); Request tab: request body", |a| a.view_body()),
-    cmd!("copy", Global, [k('y')], "copy the body to the clipboard; Request tab: request body", |a| a.copy_body()),
-    cmd!("edit", Global, [k('o')], "open the .hurl file in $EDITOR", |a| a.edit_current()),
-    cmd!("new", Global, [k('a')], "new request: name it, then edit it in $EDITOR", |a| a.prompt_new()),
-    cmd!("rename", Global, [k('m')], "rename or move the request, with its history", |a| a.prompt_rename()),
-    cmd!("duplicate", Global, [k('d')], "copy the request under a new name and open it in $EDITOR", |a| a.prompt_duplicate()),
-    cmd!("delete", Global, [k('D')], "delete the request file and its history (asks to confirm)", |a| a.delete_request()),
-    cmd!("clear-history", Global, [k('C')], "delete all stored runs (asks to confirm)", |a| a.clear_history()),
-    cmd!("sidebar-narrower", Global, [k('<')], "narrow the sidebar (or drag its edge)", |a| a.resize_sidebar(-4)),
-    cmd!("sidebar-wider", Global, [k('>')], "widen the sidebar", |a| a.resize_sidebar(4)),
-    cmd!("sidebar-fit", Global, [k('=')], "fit the sidebar to the names again", |a| a.sidebar_w = None),
-    cmd!("reload", Global, [k('R')], "reload request files", |a| a.reload_requests()),
-    cmd!("command", Global, [k(':')], "command bar: any command by name, plus env, set, export…", super::cmdline::open),
-    cmd!("help", Global, [k('?')], "this help, and the Config tab", super::help::open),
-    cmd!("quit", Global, [k('q'), ctrl('c')], "quit", |a| a.quit = true),
-    cmd!("down", Sidebar, [k('j'), code(K::Down)], "next request", |a| a.move_sel(1)),
-    cmd!("up", Sidebar, [k('k'), code(K::Up)], "previous request", |a| a.move_sel(-1)),
-    cmd!("top", Sidebar, [k('g'), code(K::Home)], "first request", |a| a.move_sel(isize::MIN / 2)),
-    cmd!("bottom", Sidebar, [k('G'), code(K::End)], "last request", |a| a.move_sel(isize::MAX / 2)),
-    cmd!("page-down-list", Sidebar, [code(K::PageDown)], "page down the list", |a| a.move_sel(a.list_page())),
-    cmd!("page-up-list", Sidebar, [code(K::PageUp)], "page up the list", |a| a.move_sel(-a.list_page())),
-    cmd!("half-down-list", Sidebar, [ctrl('d')], "half page down the list", |a| a.move_sel(a.list_page() / 2)),
-    cmd!("half-up-list", Sidebar, [ctrl('u')], "half page up the list", |a| a.move_sel(-a.list_page() / 2)),
-    cmd!("collapse", Sidebar, [k('h'), code(K::Left)], "close folder, else go to parent", |a| a.collapse()),
-    cmd!("expand", Sidebar, [k('l'), code(K::Right)], "open folder, else step in", |a| a.expand()),
-    cmd!("toggle-folder", Sidebar, [k(' ')], "open/close folder (enter too)", |a| a.toggle_dir()),
-    cmd!("expand-all", Sidebar, [], "open every folder", |a| a.expand_all()),
-    cmd!("collapse-all", Sidebar, [], "close every folder", |a| a.collapse_all()),
-    cmd!("sidebar", Sidebar, [], "switch sidebar: tree ↔ flat", |a| a.toggle_sidebar()),
-    cmd!("scroll-down", Main, [k('j'), code(K::Down)], "scroll down", |a| a.scroll_by(1)),
-    cmd!("scroll-up", Main, [k('k'), code(K::Up)], "scroll up", |a| a.scroll_by(-1)),
-    cmd!("page-down", Main, [k(' '), code(K::PageDown)], "page down", |a| a.scroll_by(a.page())),
-    cmd!("page-up", Main, [code(K::PageUp)], "page up", |a| a.scroll_by(-a.page())),
-    cmd!("half-down", Main, [ctrl('d')], "half page down", |a| a.scroll_by(a.page() / 2)),
-    cmd!("half-up", Main, [ctrl('u')], "half page up", |a| a.scroll_by(-a.page() / 2)),
-    cmd!("scroll-top", Main, [k('g'), code(K::Home)], "top", |a| a.scroll_by(isize::MIN / 2)),
-    cmd!("scroll-bottom", Main, [k('G'), code(K::End)], "bottom", |a| a.scroll_by(isize::MAX / 2)),
-    cmd!("scroll-right", Main, [k('l'), code(K::Right)], "scroll right (wrap off)", |a| a.scroll_h(8)),
-    cmd!("scroll-left", Main, [k('h'), code(K::Left)], "scroll left (wrap off)", |a| a.scroll_h(-8)),
+    cmd!("env-prev", Global, [k('E')], "previous env", |a| a
+        .cycle_env(-1)),
+    cmd!("asserts", Global, [k('t')], "toggle asserts", |a| a
+        .toggle_asserts()),
+    cmd!("tab-request", Global, [k('1')], "Request tab", |a| a
+        .set_tab(Tab::Request)),
+    cmd!("tab-response", Global, [k('2')], "Response tab", |a| a
+        .set_tab(Tab::Response)),
+    cmd!(
+        "tab-meta",
+        Global,
+        [k('3')],
+        "Meta tab: timing, history, asserts, captures",
+        |a| a.set_tab(Tab::Meta)
+    ),
+    cmd!("tab-source", Global, [k('4')], "Source tab", |a| a
+        .set_tab(Tab::Source)),
+    cmd!("wrap", Global, [k('w')], "toggle line wrap", |a| a
+        .toggle_wrap()),
+    cmd!(
+        "entry-next",
+        Global,
+        [k(']')],
+        "next entry in a chained file",
+        |a| a.cycle_entry(1)
+    ),
+    cmd!(
+        "entry-prev",
+        Global,
+        [k('[')],
+        "previous entry in a chained file",
+        |a| a.cycle_entry(-1)
+    ),
+    cmd!(
+        "export-md",
+        Global,
+        [k('x')],
+        "export run as Markdown to .whurl/exports",
+        |a| a.export(false)
+    ),
+    cmd!(
+        "export-json",
+        Global,
+        [k('X')],
+        "export run as JSON to .whurl/exports",
+        |a| a.export(true)
+    ),
+    cmd!(
+        "view",
+        Global,
+        [k('v')],
+        "view the body in viewer.command ($EDITOR -R, less); Request tab: request body",
+        |a| a.view_body()
+    ),
+    cmd!(
+        "copy",
+        Global,
+        [k('y')],
+        "copy the body to the clipboard; Request tab: request body",
+        |a| a.copy_body()
+    ),
+    cmd!(
+        "edit",
+        Global,
+        [k('o')],
+        "open the .hurl file in $EDITOR",
+        |a| a.edit_current()
+    ),
+    cmd!(
+        "new",
+        Global,
+        [k('a')],
+        "new request: name it, then edit it in $EDITOR",
+        |a| a.prompt_new()
+    ),
+    cmd!(
+        "rename",
+        Global,
+        [k('m')],
+        "rename or move the request, with its history",
+        |a| a.prompt_rename()
+    ),
+    cmd!(
+        "duplicate",
+        Global,
+        [k('d')],
+        "copy the request under a new name and open it in $EDITOR",
+        |a| a.prompt_duplicate()
+    ),
+    cmd!(
+        "delete",
+        Global,
+        [k('D')],
+        "delete the request file and its history (asks to confirm)",
+        |a| a.delete_request()
+    ),
+    cmd!(
+        "clear-history",
+        Global,
+        [k('C')],
+        "delete all stored runs (asks to confirm)",
+        |a| a.clear_history()
+    ),
+    cmd!(
+        "sidebar-narrower",
+        Global,
+        [k('<')],
+        "narrow the sidebar (or drag its edge)",
+        |a| a.resize_sidebar(-4)
+    ),
+    cmd!(
+        "sidebar-wider",
+        Global,
+        [k('>')],
+        "widen the sidebar",
+        |a| a.resize_sidebar(4)
+    ),
+    cmd!(
+        "sidebar-fit",
+        Global,
+        [k('=')],
+        "fit the sidebar to the names again",
+        |a| a.sidebar_w = None
+    ),
+    cmd!("reload", Global, [k('R')], "reload request files", |a| a
+        .reload_requests()),
+    cmd!(
+        "command",
+        Global,
+        [k(':')],
+        "command bar: any command by name, plus env, set, export…",
+        super::cmdline::open
+    ),
+    cmd!(
+        "help",
+        Global,
+        [k('?')],
+        "this help, and the Config tab",
+        super::help::open
+    ),
+    cmd!("quit", Global, [k('q'), ctrl('c')], "quit", |a| a.quit =
+        true),
+    cmd!(
+        "down",
+        Sidebar,
+        [k('j'), code(K::Down)],
+        "next request",
+        |a| a.move_sel(1)
+    ),
+    cmd!(
+        "up",
+        Sidebar,
+        [k('k'), code(K::Up)],
+        "previous request",
+        |a| a.move_sel(-1)
+    ),
+    cmd!(
+        "top",
+        Sidebar,
+        [k('g'), code(K::Home)],
+        "first request",
+        |a| a.move_sel(isize::MIN / 2)
+    ),
+    cmd!(
+        "bottom",
+        Sidebar,
+        [k('G'), code(K::End)],
+        "last request",
+        |a| a.move_sel(isize::MAX / 2)
+    ),
+    cmd!(
+        "page-down-list",
+        Sidebar,
+        [code(K::PageDown)],
+        "page down the list",
+        |a| a.move_sel(a.list_page())
+    ),
+    cmd!(
+        "page-up-list",
+        Sidebar,
+        [code(K::PageUp)],
+        "page up the list",
+        |a| a.move_sel(-a.list_page())
+    ),
+    cmd!(
+        "half-down-list",
+        Sidebar,
+        [ctrl('d')],
+        "half page down the list",
+        |a| a.move_sel(a.list_page() / 2)
+    ),
+    cmd!(
+        "half-up-list",
+        Sidebar,
+        [ctrl('u')],
+        "half page up the list",
+        |a| a.move_sel(-a.list_page() / 2)
+    ),
+    cmd!(
+        "collapse",
+        Sidebar,
+        [k('h'), code(K::Left)],
+        "close folder, else go to parent",
+        |a| a.collapse()
+    ),
+    cmd!(
+        "expand",
+        Sidebar,
+        [k('l'), code(K::Right)],
+        "open folder, else step in",
+        |a| a.expand()
+    ),
+    cmd!(
+        "toggle-folder",
+        Sidebar,
+        [k(' ')],
+        "open/close folder (enter too)",
+        |a| a.toggle_dir()
+    ),
+    cmd!("expand-all", Sidebar, [], "open every folder", |a| a
+        .expand_all()),
+    cmd!("collapse-all", Sidebar, [], "close every folder", |a| a
+        .collapse_all()),
+    cmd!(
+        "sidebar",
+        Sidebar,
+        [],
+        "switch sidebar: tree ↔ flat",
+        |a| a.toggle_sidebar()
+    ),
+    cmd!(
+        "scroll-down",
+        Main,
+        [k('j'), code(K::Down)],
+        "scroll down",
+        |a| a.scroll_by(1)
+    ),
+    cmd!("scroll-up", Main, [k('k'), code(K::Up)], "scroll up", |a| a
+        .scroll_by(-1)),
+    cmd!(
+        "page-down",
+        Main,
+        [k(' '), code(K::PageDown)],
+        "page down",
+        |a| a.scroll_by(a.page())
+    ),
+    cmd!("page-up", Main, [code(K::PageUp)], "page up", |a| a
+        .scroll_by(-a.page())),
+    cmd!("half-down", Main, [ctrl('d')], "half page down", |a| a
+        .scroll_by(a.page() / 2)),
+    cmd!("half-up", Main, [ctrl('u')], "half page up", |a| a
+        .scroll_by(-a.page() / 2)),
+    cmd!("scroll-top", Main, [k('g'), code(K::Home)], "top", |a| a
+        .scroll_by(isize::MIN / 2)),
+    cmd!(
+        "scroll-bottom",
+        Main,
+        [k('G'), code(K::End)],
+        "bottom",
+        |a| a.scroll_by(isize::MAX / 2)
+    ),
+    cmd!(
+        "scroll-right",
+        Main,
+        [k('l'), code(K::Right)],
+        "scroll right (wrap off)",
+        |a| a.scroll_h(8)
+    ),
+    cmd!(
+        "scroll-left",
+        Main,
+        [k('h'), code(K::Left)],
+        "scroll left (wrap off)",
+        |a| a.scroll_h(-8)
+    ),
 ];
 
 fn find(scope: Scope, ev: &KeyEvent) -> Option<&'static Command> {
-    COMMANDS.iter().find(|c| c.scope == scope && c.keys.iter().any(|b| b.matches(ev)))
+    COMMANDS
+        .iter()
+        .find(|c| c.scope == scope && c.keys.iter().any(|b| b.matches(ev)))
 }
 
 /// Run the command bound to `ev` in the focused pane, else globally. Returns whether one ran.

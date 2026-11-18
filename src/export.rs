@@ -83,19 +83,32 @@ fn headers_md(out: &mut String, hs: &[Header]) {
 
 pub fn markdown(run: &Run, source: Option<&str>) -> String {
     let mut o = String::new();
-    let status = run.primary().and_then(|e| e.response.as_ref()).map(|r| r.status);
+    let status = run
+        .primary()
+        .and_then(|e| e.response.as_ref())
+        .map(|r| r.status);
     let _ = writeln!(o, "# whurl run: {}\n", run.request);
     let _ = writeln!(o, "- **Run id:** `{}`", run.id);
     let _ = writeln!(o, "- **Environment:** {}", run.env);
     let _ = writeln!(o, "- **Started:** {}", run.started_at);
     let _ = writeln!(o, "- **Hurl file:** `{}`", run.file.display());
-    let _ = writeln!(o, "- **Asserts:** {}", if run.asserts { "evaluated" } else { "skipped (--no-assert)" });
+    let _ = writeln!(
+        o,
+        "- **Asserts:** {}",
+        if run.asserts {
+            "evaluated"
+        } else {
+            "skipped (--no-assert)"
+        }
+    );
     let _ = writeln!(
         o,
         "- **Result:** {} (hurl exit {}){}",
         if run.success { "success" } else { "FAILED" },
         run.exit_code,
-        status.map(|s| format!(", final status {s}")).unwrap_or_default()
+        status
+            .map(|s| format!(", final status {s}"))
+            .unwrap_or_default()
     );
     let _ = writeln!(o, "- **Requests in file:** {}", run.entries.len());
     o.push_str("\nSecret values from the env's secrets files are replaced with `***`.\n");
@@ -116,7 +129,11 @@ fn entry_md(o: &mut String, e: &Entry, numbered: bool) {
     let _ = writeln!(
         o,
         "\n## {}{} {}\n",
-        if numbered { format!("Entry {} (line {}): ", e.index, e.line) } else { String::new() },
+        if numbered {
+            format!("Entry {} (line {}): ", e.index, e.line)
+        } else {
+            String::new()
+        },
         e.method,
         e.url
     );
@@ -129,12 +146,25 @@ fn entry_md(o: &mut String, e: &Entry, numbered: bool) {
     let _ = writeln!(o, "\nEquivalent curl:\n\n```sh\n{}\n```", e.curl);
 
     let Some(r) = &e.response else {
-        o.push_str("\n### Response\n\nNo response (connection or earlier failure; see hurl errors).\n");
+        o.push_str(
+            "\n### Response\n\nNo response (connection or earlier failure; see hurl errors).\n",
+        );
         return;
     };
-    let _ = writeln!(o, "\n### Response: {} {} ({})\n", r.status, reason(r.status), r.http_version);
+    let _ = writeln!(
+        o,
+        "\n### Response: {} {} ({})\n",
+        r.status,
+        reason(r.status),
+        r.http_version
+    );
     if let Some(t) = &e.timings {
-        let _ = writeln!(o, "Total latency {}, body {}.\n", ms(t.total), bytes(r.size));
+        let _ = writeln!(
+            o,
+            "Total latency {}, body {}.\n",
+            ms(t.total),
+            bytes(r.size)
+        );
         o.push_str("| phase | time |\n|---|---|\n");
         for p in t.phases().iter().filter(|p| p.us > 0) {
             let _ = writeln!(o, "| {} | {} |", p.name, ms(p.us));
@@ -147,7 +177,11 @@ fn entry_md(o: &mut String, e: &Entry, numbered: bool) {
             let _ = writeln!(o, "\nBody: binary, {}.", bytes(r.size));
         }
         (Some(b), _) => {
-            let _ = writeln!(o, "\nBody{}:\n", if r.truncated { " (truncated)" } else { "" });
+            let _ = writeln!(
+                o,
+                "\nBody{}:\n",
+                if r.truncated { " (truncated)" } else { "" }
+            );
             o.push_str(&fence(b));
         }
         (None, _) => o.push_str("\nBody: empty.\n"),
@@ -160,9 +194,18 @@ fn entry_md(o: &mut String, e: &Entry, numbered: bool) {
     }
     let failed: Vec<_> = e.failed_asserts().collect();
     if !e.asserts.is_empty() {
-        let _ = writeln!(o, "\nAsserts: {}/{} passed.", e.asserts.len() - failed.len(), e.asserts.len());
+        let _ = writeln!(
+            o,
+            "\nAsserts: {}/{} passed.",
+            e.asserts.len() - failed.len(),
+            e.asserts.len()
+        );
         for a in failed {
-            let _ = write!(o, "\n```\n{}\n```\n", a.message.as_deref().unwrap_or("failed"));
+            let _ = write!(
+                o,
+                "\n```\n{}\n```\n",
+                a.message.as_deref().unwrap_or("failed")
+            );
         }
     }
 }

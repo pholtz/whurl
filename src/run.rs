@@ -1,7 +1,7 @@
 //! Running hurl and turning its JSON report into a redacted, self-contained `Run` record.
 
 use crate::workspace::{Redactor, RequestFile, Workspace};
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs;
@@ -101,18 +101,42 @@ impl Timings {
     pub fn phases(&self) -> Vec<Phase> {
         let dns = self.name_lookup;
         let tcp = self.connect.saturating_sub(dns);
-        let tls = if self.app_connect > 0 { self.app_connect.saturating_sub(self.connect) } else { 0 };
+        let tls = if self.app_connect > 0 {
+            self.app_connect.saturating_sub(self.connect)
+        } else {
+            0
+        };
         let setup_end = self.connect.max(self.app_connect);
         let send = self.pre_transfer.saturating_sub(setup_end);
-        let wait = self.start_transfer.saturating_sub(self.pre_transfer.max(setup_end));
+        let wait = self
+            .start_transfer
+            .saturating_sub(self.pre_transfer.max(setup_end));
         let recv = self.total.saturating_sub(self.start_transfer);
         vec![
-            Phase { name: "dns", us: dns },
-            Phase { name: "connect", us: tcp },
-            Phase { name: "tls", us: tls },
-            Phase { name: "send", us: send },
-            Phase { name: "wait", us: wait },
-            Phase { name: "download", us: recv },
+            Phase {
+                name: "dns",
+                us: dns,
+            },
+            Phase {
+                name: "connect",
+                us: tcp,
+            },
+            Phase {
+                name: "tls",
+                us: tls,
+            },
+            Phase {
+                name: "send",
+                us: send,
+            },
+            Phase {
+                name: "wait",
+                us: wait,
+            },
+            Phase {
+                name: "download",
+                us: recv,
+            },
         ]
     }
 }
@@ -129,7 +153,11 @@ impl Entry {
 impl Run {
     /// The entry to show by default: the last one that produced a response.
     pub fn primary(&self) -> Option<&Entry> {
-        self.entries.iter().rev().find(|e| e.response.is_some()).or(self.entries.last())
+        self.entries
+            .iter()
+            .rev()
+            .find(|e| e.response.is_some())
+            .or(self.entries.last())
     }
     pub fn primary_index(&self) -> usize {
         self.entries
@@ -173,7 +201,9 @@ pub fn spawn(ws: &Workspace, req: &RequestFile, opts: &RunOpts) -> Result<Pendin
     if let Some(s) = secrets {
         cmd.arg("--secrets-file").arg(s);
     }
-    cmd.arg("--report-json").arg(tmp.path().join("report")).arg("--no-output");
+    cmd.arg("--report-json")
+        .arg(tmp.path().join("report"))
+        .arg("--no-output");
     if !opts.asserts {
         cmd.arg("--no-assert");
     }
@@ -181,11 +211,15 @@ pub fn spawn(ws: &Workspace, req: &RequestFile, opts: &RunOpts) -> Result<Pendin
     cmd.env("NO_COLOR", "1");
     // stderr goes to a file rather than a pipe so a waiter that only polls can't deadlock on a
     // full pipe buffer.
-    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(fs::File::create(tmp.path().join("stderr"))?);
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(fs::File::create(tmp.path().join("stderr"))?);
 
     let started_at = chrono::Local::now();
     let t0 = Instant::now();
-    let child = cmd.spawn().context("running hurl (is it installed and on PATH?)")?;
+    let child = cmd
+        .spawn()
+        .context("running hurl (is it installed and on PATH?)")?;
     Ok(Pending {
         child,
         tmp,
@@ -215,16 +249,27 @@ impl Pending {
         let file_report = report.as_array().and_then(|a| a.first());
         let entries = file_report
             .and_then(|f| f["entries"].as_array())
-            .map(|es| es.iter().map(|e| parse_entry(e, &report_dir, &redact)).collect())
+            .map(|es| {
+                es.iter()
+                    .map(|e| parse_entry(e, &report_dir, &redact))
+                    .collect()
+            })
             .unwrap_or_default();
 
         let run = Run {
-            id: format!("{}_{}_{}", self.started_at.format("%Y%m%d-%H%M%S-%3f"), self.env, self.request.replace('/', "__")),
+            id: format!(
+                "{}_{}_{}",
+                self.started_at.format("%Y%m%d-%H%M%S-%3f"),
+                self.env,
+                self.request.replace('/', "__")
+            ),
             request: self.request,
             file: self.file,
             env: self.env,
             asserts: self.asserts,
-            started_at: self.started_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, false),
+            started_at: self
+                .started_at
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, false),
             wall_ms,
             success: status.success(),
             exit_code: status.code().unwrap_or(-1),
@@ -270,7 +315,9 @@ fn split_empty_secrets(src: &str) -> (String, String) {
     let (mut kept, mut empty) = (String::new(), String::new());
     for line in src.lines() {
         let t = line.trim();
-        let Some((name, value)) = t.split_once('=') else { continue };
+        let Some((name, value)) = t.split_once('=') else {
+            continue;
+        };
         if t.starts_with('#') || name.trim().is_empty() {
             continue;
         }
@@ -290,7 +337,10 @@ fn parse_entry(e: &Value, report_dir: &Path, redact: &Redactor) -> Entry {
         v.as_array()
             .into_iter()
             .flatten()
-            .map(|h| Header { name: s(&h["name"]), value: redact.apply(&s(&h["value"])) })
+            .map(|h| Header {
+                name: s(&h["name"]),
+                value: redact.apply(&s(&h["value"])),
+            })
             .collect()
     };
     let curl = s(&e["curl_cmd"]);
@@ -300,12 +350,15 @@ fn parse_entry(e: &Value, report_dir: &Path, redact: &Redactor) -> Entry {
         None => curl_method_url(&curl),
     };
     let request = Request {
-        headers: call.map(|c| headers(&c["request"]["headers"])).unwrap_or_default(),
+        headers: call
+            .map(|c| headers(&c["request"]["headers"]))
+            .unwrap_or_default(),
         body: curl_body(&curl).map(|b| redact.apply(&b)),
     };
     let response = call.map(|c| {
         let r = &c["response"];
-        let (body, size, truncated, binary) = read_body(r["body"].as_str().map(|p| report_dir.join(p)));
+        let (body, size, truncated, binary) =
+            read_body(r["body"].as_str().map(|p| report_dir.join(p)));
         Response {
             status: r["status"].as_u64().unwrap_or(0) as u16,
             http_version: s(&r["http_version"]),
@@ -378,8 +431,20 @@ fn curl_method_url(curl: &str) -> (String, String) {
         .windows(2)
         .find(|w| w[0] == "--request" || w[0] == "-X")
         .map(|w| w[1].clone())
-        .unwrap_or_else(|| if curl_body(curl).is_some() { "POST" } else { "GET" }.into());
-    let url = args.iter().rev().find(|a| a.contains("://")).cloned().unwrap_or_default();
+        .unwrap_or_else(|| {
+            if curl_body(curl).is_some() {
+                "POST"
+            } else {
+                "GET"
+            }
+            .into()
+        });
+    let url = args
+        .iter()
+        .rev()
+        .find(|a| a.contains("://"))
+        .cloned()
+        .unwrap_or_default();
     (method, url)
 }
 
@@ -388,7 +453,12 @@ fn curl_body(curl: &str) -> Option<String> {
     let args = shell_words(curl);
     let parts: Vec<&str> = args
         .windows(2)
-        .filter(|w| matches!(w[0].as_str(), "--data" | "--data-binary" | "--data-raw" | "--data-urlencode" | "--form"))
+        .filter(|w| {
+            matches!(
+                w[0].as_str(),
+                "--data" | "--data-binary" | "--data-raw" | "--data-urlencode" | "--form"
+            )
+        })
         .map(|w| w[1].as_str())
         .collect();
     match parts.as_slice() {
@@ -440,7 +510,9 @@ fn shell_words(s: &str) -> Vec<String> {
                             }
                             Some('u') => {
                                 let hex: String = (0..4).filter_map(|_| chars.next()).collect();
-                                if let Some(ch) = u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32) {
+                                if let Some(ch) =
+                                    u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32)
+                                {
                                     cur.push(ch);
                                 }
                             }
@@ -515,18 +587,31 @@ mod tests {
     #[test]
     fn curl_body_ansi_c() {
         let c = r#"curl --header 'Authorization: Bearer x' --data $'{"a": "it\'s", "b": 1}\n' 'http://h/x'"#;
-        assert_eq!(curl_body(c).as_deref(), Some("{\"a\": \"it's\", \"b\": 1}\n"));
+        assert_eq!(
+            curl_body(c).as_deref(),
+            Some("{\"a\": \"it's\", \"b\": 1}\n")
+        );
         assert_eq!(curl_method_url(c), ("POST".into(), "http://h/x".into()));
     }
 
     #[test]
     fn curl_concatenated_quotes() {
-        assert_eq!(shell_words(r"--data 'a'\''b' x"), vec!["--data", "a'b", "x"]);
+        assert_eq!(
+            shell_words(r"--data 'a'\''b' x"),
+            vec!["--data", "a'b", "x"]
+        );
     }
 
     #[test]
     fn phases_sum_to_total() {
-        let t = Timings { name_lookup: 10, connect: 30, app_connect: 70, pre_transfer: 75, start_transfer: 900, total: 950 };
+        let t = Timings {
+            name_lookup: 10,
+            connect: 30,
+            app_connect: 70,
+            pre_transfer: 75,
+            start_transfer: 900,
+            total: 950,
+        };
         let p = t.phases();
         assert_eq!(p.iter().map(|p| p.us).sum::<u64>(), 950);
         assert_eq!(p[4].us, 825);

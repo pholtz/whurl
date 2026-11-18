@@ -15,14 +15,30 @@ impl Paint {
         Paint(std::io::stderr().is_terminal() && std::env::var_os("NO_COLOR").is_none())
     }
     fn wrap(self, code: &str, s: &str) -> String {
-        if self.0 { format!("\x1b[{code}m{s}\x1b[0m") } else { s.to_string() }
+        if self.0 {
+            format!("\x1b[{code}m{s}\x1b[0m")
+        } else {
+            s.to_string()
+        }
     }
-    pub fn bold(self, s: &str) -> String { self.wrap("1", s) }
-    pub fn dim(self, s: &str) -> String { self.wrap("2", s) }
-    pub fn red(self, s: &str) -> String { self.wrap("31", s) }
-    pub fn green(self, s: &str) -> String { self.wrap("32", s) }
-    pub fn cyan(self, s: &str) -> String { self.wrap("36", s) }
-    pub fn fg(self, code: u8, s: &str) -> String { self.wrap(&format!("38;5;{code}"), s) }
+    pub fn bold(self, s: &str) -> String {
+        self.wrap("1", s)
+    }
+    pub fn dim(self, s: &str) -> String {
+        self.wrap("2", s)
+    }
+    pub fn red(self, s: &str) -> String {
+        self.wrap("31", s)
+    }
+    pub fn green(self, s: &str) -> String {
+        self.wrap("32", s)
+    }
+    pub fn cyan(self, s: &str) -> String {
+        self.wrap("36", s)
+    }
+    pub fn fg(self, code: u8, s: &str) -> String {
+        self.wrap(&format!("38;5;{code}"), s)
+    }
     pub fn method(self, m: &str) -> String {
         match m {
             "GET" => self.wrap("1;32", m),
@@ -66,7 +82,11 @@ pub fn waterfall(p: Paint, t: &Timings, width: usize) -> String {
         .filter(|(_, ph)| ph.us > 0)
         .map(|(i, ph)| format!("{} {}", p.fg(PHASE_COLORS[i], ph.name), ms(ph.us)))
         .collect();
-    format!("{bar}{}  {}", " ".repeat(width.saturating_sub(used)), legend.join(&p.dim(" · ")))
+    format!(
+        "{bar}{}  {}",
+        " ".repeat(width.saturating_sub(used)),
+        legend.join(&p.dim(" · "))
+    )
 }
 
 fn headers(p: Paint, hs: &[Header], prefix: &str) {
@@ -82,7 +102,11 @@ pub struct Show {
 
 pub fn run(run: &Run, show: &Show) {
     let p = Paint::stdout();
-    println!("{} {}", p.dim(&format!("[{}]", run.env)), p.bold(&run.request));
+    println!(
+        "{} {}",
+        p.dim(&format!("[{}]", run.env)),
+        p.bold(&run.request)
+    );
     let primary = run.primary_index();
     for (i, e) in run.entries.iter().enumerate() {
         entry(p, e, show.headers, show.body && i == primary);
@@ -149,8 +173,14 @@ pub fn history_line(p: Paint, run: &Run) -> String {
         .and_then(|e| e.response.as_ref())
         .map(|r| p.status(r.status))
         .unwrap_or_else(|| p.red("ERR"));
-    let lat = e.and_then(|e| e.total_us()).map(ms).unwrap_or_else(|| "-".into());
-    let size = e.and_then(|e| e.response.as_ref()).map(|r| bytes(r.size)).unwrap_or_default();
+    let lat = e
+        .and_then(|e| e.total_us())
+        .map(ms)
+        .unwrap_or_else(|| "-".into());
+    let size = e
+        .and_then(|e| e.response.as_ref())
+        .map(|r| bytes(r.size))
+        .unwrap_or_default();
     format!(
         "{}  {:<10} {:<34} {:>8} {:>9}  {}",
         p.dim(&run.started_at[..19].replace('T', " ")),

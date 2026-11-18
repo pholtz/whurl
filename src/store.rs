@@ -3,7 +3,7 @@
 
 use crate::run::Run;
 use crate::workspace::Workspace;
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::fs;
 use std::path::PathBuf;
 
@@ -18,7 +18,10 @@ pub fn save(ws: &Workspace, run: &Run) -> Result<()> {
     if !gitignore.exists() {
         fs::write(&gitignore, "*\n")?;
     }
-    fs::write(dir.join(format!("{}.json", run.id)), serde_json::to_vec_pretty(run)?)?;
+    fs::write(
+        dir.join(format!("{}.json", run.id)),
+        serde_json::to_vec_pretty(run)?,
+    )?;
     Ok(())
 }
 
@@ -28,7 +31,12 @@ pub fn ids(ws: &Workspace) -> Vec<String> {
         .into_iter()
         .flatten()
         .flatten()
-        .filter_map(|e| e.file_name().to_string_lossy().strip_suffix(".json").map(String::from))
+        .filter_map(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .strip_suffix(".json")
+                .map(String::from)
+        })
         .collect();
     ids.sort_unstable_by(|a, b| b.cmp(a));
     ids
@@ -64,7 +72,11 @@ pub fn find(ws: &Workspace, sel: &str) -> Result<Run> {
         bail!("no runs yet");
     }
     if let Some(rest) = sel.strip_prefix("last") {
-        let n: usize = rest.strip_prefix('~').map(str::parse).transpose()?.unwrap_or(0);
+        let n: usize = rest
+            .strip_prefix('~')
+            .map(str::parse)
+            .transpose()?
+            .unwrap_or(0);
         return load(ws, all.get(n).context("not that many runs")?);
     }
     if all.iter().any(|i| i == sel) {
@@ -131,12 +143,17 @@ pub fn rename(ws: &Workspace, from: &str, to: &str, file: &std::path::Path) -> R
         }
         let env = v["env"].as_str().unwrap_or_default().to_string();
         let old_tail = id_suffix(&env, from);
-        let Some(stem) = id.strip_suffix(&old_tail) else { continue };
+        let Some(stem) = id.strip_suffix(&old_tail) else {
+            continue;
+        };
         let new_id = format!("{stem}{}", id_suffix(&env, to));
         v["id"] = new_id.clone().into();
         v["request"] = to.into();
         v["file"] = file.to_string_lossy().into_owned().into();
-        fs::write(dir.join(format!("{new_id}.json")), serde_json::to_vec_pretty(&v)?)?;
+        fs::write(
+            dir.join(format!("{new_id}.json")),
+            serde_json::to_vec_pretty(&v)?,
+        )?;
         fs::remove_file(&path)?;
         n += 1;
     }

@@ -23,7 +23,12 @@ pub fn panel(focused: bool) -> Block<'static> {
 pub fn centered(area: Rect, w: u16, h: u16) -> Rect {
     let w = w.min(area.width);
     let h = h.min(area.height);
-    Rect { x: area.x + (area.width - w) / 2, y: area.y + (area.height - h) / 2, width: w, height: h }
+    Rect {
+        x: area.x + (area.width - w) / 2,
+        y: area.y + (area.height - h) / 2,
+        width: w,
+        height: h,
+    }
 }
 
 pub fn status_color(s: u16) -> Color {
@@ -63,8 +68,12 @@ pub fn short_method(m: &str) -> &str {
 }
 
 pub fn ago(ts: &str) -> String {
-    let Ok(t) = chrono::DateTime::parse_from_rfc3339(ts) else { return String::new() };
-    let s = (chrono::Local::now().fixed_offset() - t).num_seconds().max(0);
+    let Ok(t) = chrono::DateTime::parse_from_rfc3339(ts) else {
+        return String::new();
+    };
+    let s = (chrono::Local::now().fixed_offset() - t)
+        .num_seconds()
+        .max(0);
     match s {
         0..=4 => "just now".into(),
         5..=59 => format!("{s}s ago"),
@@ -81,8 +90,17 @@ pub fn draw_spark(f: &mut Frame, area: Rect, lat: &[u64]) {
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(Style::new().fg(Color::Indexed(238)))
-        .title(Span::styled(format!(" latency · max {} ", ms(max)), Style::new().dark_gray()));
-    f.render_widget(Sparkline::default().block(block).data(data).style(Style::new().fg(Color::Indexed(214))), area);
+        .title(Span::styled(
+            format!(" latency · max {} ", ms(max)),
+            Style::new().dark_gray(),
+        ));
+    f.render_widget(
+        Sparkline::default()
+            .block(block)
+            .data(data)
+            .style(Style::new().fg(Color::Indexed(214))),
+        area,
+    );
 }
 
 pub fn waterfall_line(t: &Timings, width: usize) -> Line<'static> {
@@ -93,9 +111,14 @@ pub fn waterfall_line(t: &Timings, width: usize) -> Line<'static> {
         if p.us == 0 {
             continue;
         }
-        let w = (((p.us as f64 / total) * width as f64).round() as usize).max(1).min(width.saturating_sub(used));
+        let w = (((p.us as f64 / total) * width as f64).round() as usize)
+            .max(1)
+            .min(width.saturating_sub(used));
         used += w;
-        spans.push(Span::styled("█".repeat(w), Style::new().fg(Color::Indexed(PHASE_COLORS[i]))));
+        spans.push(Span::styled(
+            "█".repeat(w),
+            Style::new().fg(Color::Indexed(PHASE_COLORS[i])),
+        ));
     }
     Line::from(spans)
 }
@@ -106,14 +129,20 @@ pub fn phase_legend(t: &Timings) -> Line<'static> {
         if !spans.is_empty() {
             spans.push(Span::styled(" · ", Style::new().dark_gray()));
         }
-        spans.push(Span::styled(p.name, Style::new().fg(Color::Indexed(PHASE_COLORS[i]))));
+        spans.push(Span::styled(
+            p.name,
+            Style::new().fg(Color::Indexed(PHASE_COLORS[i])),
+        ));
         spans.push(Span::raw(format!(" {}", ms(p.us))));
     }
     Line::from(spans)
 }
 
 pub fn section(s: &str) -> Line<'static> {
-    Line::from(Span::styled(s.to_string(), Style::new().bold().underlined()))
+    Line::from(Span::styled(
+        s.to_string(),
+        Style::new().bold().underlined(),
+    ))
 }
 
 pub fn header_lines(hs: &[Header]) -> Vec<Line<'static>> {
@@ -133,7 +162,9 @@ pub fn body_lines(body: &str) -> Vec<Line<'static>> {
     if is_json(body) {
         pretty(body).lines().map(json_line).collect()
     } else {
-        body.lines().map(|l| Line::from(l.replace('\t', "    "))).collect()
+        body.lines()
+            .map(|l| Line::from(l.replace('\t', "    ")))
+            .collect()
     }
 }
 
@@ -160,20 +191,33 @@ fn json_line(line: &str) -> Line<'static> {
             let is_key = chars[i..].iter().find(|c| !c.is_whitespace()) == Some(&':');
             spans.push(Span::styled(s, if is_key { key } else { string }));
         } else if c == '-' || c.is_ascii_digit() {
-            while i < chars.len() && (chars[i].is_ascii_alphanumeric() || matches!(chars[i], '.' | '-' | '+')) {
+            while i < chars.len()
+                && (chars[i].is_ascii_alphanumeric() || matches!(chars[i], '.' | '-' | '+'))
+            {
                 i += 1;
             }
-            spans.push(Span::styled(chars[start..i].iter().collect::<String>(), number));
+            spans.push(Span::styled(
+                chars[start..i].iter().collect::<String>(),
+                number,
+            ));
         } else if c.is_ascii_alphabetic() {
             while i < chars.len() && chars[i].is_ascii_alphabetic() {
                 i += 1;
             }
-            spans.push(Span::styled(chars[start..i].iter().collect::<String>(), lit));
+            spans.push(Span::styled(
+                chars[start..i].iter().collect::<String>(),
+                lit,
+            ));
         } else {
-            while i < chars.len() && !(chars[i] == '"' || chars[i] == '-' || chars[i].is_ascii_alphanumeric()) {
+            while i < chars.len()
+                && !(chars[i] == '"' || chars[i] == '-' || chars[i].is_ascii_alphanumeric())
+            {
                 i += 1;
             }
-            spans.push(Span::styled(chars[start..i].iter().collect::<String>(), punct));
+            spans.push(Span::styled(
+                chars[start..i].iter().collect::<String>(),
+                punct,
+            ));
         }
     }
     Line::from(spans)
@@ -186,7 +230,10 @@ pub fn vars(s: &str, base: Style) -> Vec<Span<'static>> {
     while let Some(a) = rest.find("{{") {
         let Some(b) = rest[a..].find("}}") else { break };
         out.push(Span::styled(rest[..a].to_string(), base));
-        out.push(Span::styled(rest[a..a + b + 2].to_string(), Style::new().yellow()));
+        out.push(Span::styled(
+            rest[a..a + b + 2].to_string(),
+            Style::new().yellow(),
+        ));
         rest = &rest[a + b + 2..];
     }
     out.push(Span::styled(rest.to_string(), base));

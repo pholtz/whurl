@@ -27,6 +27,33 @@ whurl history
 whurl tui
 ```
 
+## Shell completion
+
+`whurl completions <shell>` prints a registration script for Bash, Zsh, Fish, PowerShell, or
+Elvish. Source it from your shell startup file:
+
+```sh
+# Bash
+source <(whurl completions bash)
+
+# Zsh
+source <(whurl completions zsh)
+
+# Fish
+whurl completions fish | source
+
+# PowerShell
+whurl completions powershell | Out-String | Invoke-Expression
+```
+
+Keep the matching command in your shell startup file and re-source it after upgrading `whurl`.
+
+Completions include commands and options, workspace request names, environment names, and stored
+run selectors. Request targets are suggested in their canonical form (for example,
+`billing/list_invoices`), without `requests/` or `.hurl`; typing `requests/` continues that form
+when it is useful. Workspace values are discovered from the current directory, `--workspace`,
+`WHURL_WORKSPACE`, or config just as they are when running a command.
+
 ## Workspace
 
 ```

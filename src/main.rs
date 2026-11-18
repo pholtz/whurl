@@ -1,3 +1,4 @@
+mod completion;
 mod config;
 mod export;
 mod print;
@@ -7,7 +8,8 @@ mod tui;
 mod workspace;
 
 use anyhow::Result;
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
+use clap_complete::ArgValueCompleter;
 use std::io::IsTerminal;
 use std::path::PathBuf;
 use workspace::Workspace;
@@ -21,7 +23,7 @@ use workspace::Workspace;
 struct Cli {
     /// Workspace root (holds requests/ and env/). Defaults to the nearest ancestor of the
     /// current directory that has both, then `workspace` in the config file.
-    #[arg(long, global = true, env = "WHURL_WORKSPACE")]
+    #[arg(long, global = true, env = "WHURL_WORKSPACE", value_hint = ValueHint::DirPath)]
     workspace: Option<PathBuf>,
 
     #[command(subcommand)]
@@ -33,6 +35,7 @@ enum Cmd {
     /// Open the interactive TUI.
     Tui {
         /// Initial filter for the request list.
+        #[arg(add = ArgValueCompleter::new(completion::requests))]
         query: Option<String>,
         #[command(flatten)]
         env: EnvArg,
@@ -41,6 +44,7 @@ enum Cmd {
     #[command(visible_alias = "ls")]
     List {
         /// Filter by name (fuzzy; space-separated terms must all match).
+        #[arg(add = ArgValueCompleter::new(completion::requests))]
         query: Vec<String>,
         #[arg(long)]
         json: bool,
@@ -50,7 +54,7 @@ enum Cmd {
     /// Show a stored run (default: the latest).
     Show {
         /// `last`, `last~N`, a run id or id prefix, or a request name (its latest run).
-        #[arg(default_value = "last")]
+        #[arg(default_value = "last", add = ArgValueCompleter::new(completion::runs))]
         run: String,
         #[command(flatten)]
         out: OutArgs,
@@ -59,6 +63,7 @@ enum Cmd {
     #[command(visible_alias = "log")]
     History {
         /// Only runs of requests matching this.
+        #[arg(add = ArgValueCompleter::new(completion::requests))]
         query: Option<String>,
         #[arg(short = 'n', long, default_value_t = 20)]
         limit: usize,
@@ -67,12 +72,12 @@ enum Cmd {
     },
     /// Export a run (request, response, timings, hurl source) for agents or sharing.
     Export {
-        #[arg(default_value = "last")]
+        #[arg(default_value = "last", add = ArgValueCompleter::new(completion::runs))]
         run: String,
         #[arg(short, long, value_enum, default_value_t = Format::Md)]
         format: Format,
         /// Write to this file instead of stdout.
-        #[arg(short, long)]
+        #[arg(short, long, value_hint = ValueHint::FilePath)]
         output: Option<PathBuf>,
     },
     /// List environments and their non-secret variables.
@@ -80,18 +85,25 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Print shell-completion registration. Source its output in your shell.
+    #[command(visible_alias = "completion")]
+    Completions {
+        #[arg(value_enum)]
+        shell: completion::Shell,
+    },
 }
 
 #[derive(Args)]
 struct EnvArg {
     /// Environment: a file env/<ENV>.env. Default: `run.default_env` in the config, then local.
-    #[arg(short, long, env = "HURL_ENV")]
+    #[arg(short, long, env = "HURL_ENV", add = ArgValueCompleter::new(completion::envs))]
     env: Option<String>,
 }
 
 #[derive(Args)]
 struct RunArgs {
     /// A .hurl path or a fuzzy request name, e.g. `semantics/get_segment_size` or `seg size`.
+    #[arg(add = ArgValueCompleter::new(completion::requests))]
     target: String,
     #[command(flatten)]
     env: EnvArg,
@@ -101,7 +113,7 @@ struct RunArgs {
     #[command(flatten)]
     out: OutArgs,
     /// Also write the run to this file (.json for JSON, otherwise Markdown).
-    #[arg(short = 'x', long, value_name = "PATH")]
+    #[arg(short = 'x', long, value_name = "PATH", value_hint = ValueHint::FilePath)]
     export: Option<PathBuf>,
     /// Extra arguments passed to hurl, after `--`.
     #[arg(last = true)]
@@ -134,6 +146,8 @@ enum Format {
 }
 
 fn main() {
+    completion::handle::<Cli>();
+
     if let Err(e) = real_main() {
         eprintln!("whurl: {e:#}");
         std::process::exit(2);
@@ -141,16 +155,19 @@ fn main() {
 }
 
 fn real_main() -> Result<()> {
-    let cli = Cli::parse();
+    let Cli { workspace, cmd } = Cli::parse();
+    if let Some(Cmd::Completions { shell }) = &cmd {
+        return completion::print_script(*shell);
+    }
+
     let cfg = config::Config::load()?;
-    let ws = Workspace::discover(cli.workspace, cfg.workspace())?;
-    match cli.cmd {
+    let ws = Workspace::discover(workspace, cfg.workspace())?;
+    match cmd {
         None if std::io::stdout().is_terminal() => {
             let env = cfg.env(std::env::var("HURL_ENV").ok().filter(|e| !e.is_empty()));
             tui::run(ws, cfg, None, env)
         }
         None => {
-            use clap::CommandFactory;
             Cli::command().print_help()?;
             Ok(())
         }
@@ -165,7 +182,11 @@ fn real_main() -> Result<()> {
             output(&ws, &r, &out)
         }
         Some(Cmd::History { query, limit, json }) => history(&ws, query.as_deref(), limit, json),
-        Some(Cmd::Export { run, format, output }) => {
+        Some(Cmd::Export {
+            run,
+            format,
+            output,
+        }) => {
             let r = store::find(&ws, &run)?;
             let text = render_export(&r, format);
             match output {
@@ -178,6 +199,7 @@ fn real_main() -> Result<()> {
             Ok(())
         }
         Some(Cmd::Envs { json }) => envs(&ws, json),
+        Some(Cmd::Completions { .. }) => unreachable!("handled before workspace discovery"),
     }
 }
 
@@ -204,8 +226,15 @@ fn list(ws: &Workspace, query: &str, json: bool) -> Result<()> {
     let width = idx.iter().map(|&i| all[i].rel.len()).max().unwrap_or(0);
     for &i in &idx {
         let r = &all[i];
-        let (m, url) = r.primary().map(|e| (e.method.as_str(), e.url.as_str())).unwrap_or(("?", ""));
-        let more = if r.entries.len() > 1 { p.dim(&format!(" (+{})", r.entries.len() - 1)) } else { String::new() };
+        let (m, url) = r
+            .primary()
+            .map(|e| (e.method.as_str(), e.url.as_str()))
+            .unwrap_or(("?", ""));
+        let more = if r.entries.len() > 1 {
+            p.dim(&format!(" (+{})", r.entries.len() - 1))
+        } else {
+            String::new()
+        };
         println!("{:<width$}  {:<6} {}{more}", r.rel, p.method(m), p.dim(url));
     }
     Ok(())
@@ -223,11 +252,26 @@ fn run_cmd(ws: &Workspace, cfg: &config::Config, a: RunArgs) -> Result<()> {
     let env = cfg.env(a.env.env);
     ws.vars_file(&env)?;
     if !a.out.body && !a.out.json && !a.out.md && std::io::stderr().is_terminal() {
-        eprintln!("{}", print::Paint::stderr().dim(&format!("running {} [{env}]…", req.rel)));
+        eprintln!(
+            "{}",
+            print::Paint::stderr().dim(&format!("running {} [{env}]…", req.rel))
+        );
     }
-    let r = run::run(ws, &req, &run::RunOpts { env, asserts: a.test || cfg.run.asserts, extra_args: a.hurl_args })?;
+    let r = run::run(
+        ws,
+        &req,
+        &run::RunOpts {
+            env,
+            asserts: a.test || cfg.run.asserts,
+            extra_args: a.hurl_args,
+        },
+    )?;
     if let Some(p) = &a.export {
-        let fmt = if p.extension().is_some_and(|e| e == "json") { Format::Json } else { Format::Md };
+        let fmt = if p.extension().is_some_and(|e| e == "json") {
+            Format::Json
+        } else {
+            Format::Md
+        };
         std::fs::write(p, render_export(&r, fmt))?;
         eprintln!("{}", print::green(&format!("exported {}", p.display())));
     }
@@ -244,14 +288,24 @@ fn output(_ws: &Workspace, r: &run::Run, out: &OutArgs) -> Result<()> {
     } else if out.md {
         print!("{}", render_export(r, Format::Md));
     } else if out.body {
-        if let Some(b) = r.primary().and_then(|e| e.response.as_ref()).and_then(|r| r.body.as_ref()) {
+        if let Some(b) = r
+            .primary()
+            .and_then(|e| e.response.as_ref())
+            .and_then(|r| r.body.as_ref())
+        {
             print!("{b}");
         }
         if !r.stderr.is_empty() {
             eprintln!("{}", r.stderr);
         }
     } else {
-        print::run(r, &print::Show { headers: out.headers, body: !out.no_body });
+        print::run(
+            r,
+            &print::Show {
+                headers: out.headers,
+                body: !out.no_body,
+            },
+        );
     }
     Ok(())
 }
@@ -261,7 +315,11 @@ fn history(ws: &Workspace, query: Option<&str>, limit: usize, json: bool) -> Res
         Some(q) => store::ids_for(ws, &ws.resolve(q)?.rel, None),
         None => store::ids(ws),
     };
-    let runs: Vec<_> = ids.iter().take(limit).filter_map(|id| store::load(ws, id).ok()).collect();
+    let runs: Vec<_> = ids
+        .iter()
+        .take(limit)
+        .filter_map(|id| store::load(ws, id).ok())
+        .collect();
     if json {
         let v: Vec<_> = runs
             .iter()
@@ -312,7 +370,11 @@ fn envs(ws: &Workspace, json: bool) -> Result<()> {
             println!("  {} = {}", p.cyan(k), v);
         }
         if !secret_names.is_empty() {
-            println!("  {} {}", p.dim("secrets:"), p.dim(&secret_names.join(", ")));
+            println!(
+                "  {} {}",
+                p.dim("secrets:"),
+                p.dim(&secret_names.join(", "))
+            );
         }
     }
     if json {

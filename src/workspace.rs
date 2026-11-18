@@ -1,13 +1,13 @@
 //! Workspace layout: `requests/**/*.hurl`, `env/<name>.env`, `env/<name>.secrets.env`,
 //! `env/shared.secrets.env`. whurl keeps its own state (run history, exports) in `.whurl/`.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 const METHODS: &[&str] = &[
-    "GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH", "LINK", "UNLINK",
-    "PURGE", "LOCK", "UNLOCK", "PROPFIND", "VIEW", "QUERY",
+    "GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH", "LINK",
+    "UNLINK", "PURGE", "LOCK", "UNLOCK", "PROPFIND", "VIEW", "QUERY",
 ];
 
 pub struct Workspace {
@@ -34,7 +34,8 @@ pub struct EntryLine {
 
 impl RequestFile {
     pub fn parse(path: &Path, requests_dir: &Path) -> Result<Self> {
-        let src = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+        let src =
+            fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
         let rel = path
             .strip_prefix(requests_dir)
             .unwrap_or(path)
@@ -47,7 +48,12 @@ impl RequestFile {
             .and_then(|l| l.strip_prefix('#'))
             .map(|t| t.trim().to_string())
             .filter(|t| !t.is_empty());
-        Ok(Self { path: path.to_path_buf(), rel, title, entries: parse_entries(&src) })
+        Ok(Self {
+            path: path.to_path_buf(),
+            rel,
+            title,
+            entries: parse_entries(&src),
+        })
     }
 
     /// The request that best represents the file: the last one (earlier ones are usually setup).
@@ -70,9 +76,15 @@ fn parse_entries(src: &str) -> Vec<EntryLine> {
         }
         let mut parts = line.split_whitespace();
         if let (Some(m), Some(url)) = (parts.next(), parts.next())
-            && METHODS.contains(&m) && !line.starts_with(char::is_whitespace) {
-                out.push(EntryLine { method: m.to_string(), url: url.to_string(), line: i + 1 });
-            }
+            && METHODS.contains(&m)
+            && !line.starts_with(char::is_whitespace)
+        {
+            out.push(EntryLine {
+                method: m.to_string(),
+                url: url.to_string(),
+                line: i + 1,
+            });
+        }
     }
     out
 }
@@ -93,13 +105,18 @@ impl Workspace {
             return checked(p);
         }
         if let Ok(cwd) = std::env::current_dir()
-            && let Some(p) = cwd.ancestors().find(|p| is_ws(p)) {
-                return Ok(Self { root: p.to_path_buf() });
-            }
+            && let Some(p) = cwd.ancestors().find(|p| is_ws(p))
+        {
+            return Ok(Self {
+                root: p.to_path_buf(),
+            });
+        }
         if let Some(p) = configured {
             return checked(p);
         }
-        bail!("no workspace found; pass --workspace, set WHURL_WORKSPACE, or set `workspace` in the config")
+        bail!(
+            "no workspace found; pass --workspace, set WHURL_WORKSPACE, or set `workspace` in the config"
+        )
     }
 
     pub fn requests_dir(&self) -> PathBuf {
@@ -142,11 +159,18 @@ impl Workspace {
                     return Ok(all[exact].clone());
                 }
                 let suffix = format!("/{query}");
-                let tail: Vec<_> = many.iter().filter(|&&i| all[i].rel.ends_with(&suffix)).collect();
+                let tail: Vec<_> = many
+                    .iter()
+                    .filter(|&&i| all[i].rel.ends_with(&suffix))
+                    .collect();
                 if let [one] = tail[..] {
                     return Ok(all[*one].clone());
                 }
-                let names: Vec<_> = many.iter().take(15).map(|&i| format!("  {}", all[i].rel)).collect();
+                let names: Vec<_> = many
+                    .iter()
+                    .take(15)
+                    .map(|&i| format!("  {}", all[i].rel))
+                    .collect();
                 bail!(
                     "'{query}' matches {} requests:\n{}{}",
                     many.len(),
@@ -169,7 +193,12 @@ impl Workspace {
             })
             .collect();
         // Conventional order first, then anything else alphabetically.
-        let rank = |e: &str| ["local", "staging", "production"].iter().position(|x| *x == e).unwrap_or(9);
+        let rank = |e: &str| {
+            ["local", "staging", "production"]
+                .iter()
+                .position(|x| *x == e)
+                .unwrap_or(9)
+        };
         out.sort_by(|a, b| rank(a).cmp(&rank(b)).then(a.cmp(b)));
         out
     }
@@ -177,7 +206,10 @@ impl Workspace {
     pub fn vars_file(&self, env: &str) -> Result<PathBuf> {
         let p = self.root.join("env").join(format!("{env}.env"));
         if !p.is_file() {
-            bail!("no env file env/{env}.env (have: {})", self.envs().join(", "));
+            bail!(
+                "no env file env/{env}.env (have: {})",
+                self.envs().join(", ")
+            );
         }
         Ok(p)
     }
@@ -191,11 +223,18 @@ impl Workspace {
     }
 
     pub fn vars(&self, env: &str) -> Vec<(String, String)> {
-        self.vars_file(env).map(|p| read_env(&p)).unwrap_or_default()
+        self.vars_file(env)
+            .map(|p| read_env(&p))
+            .unwrap_or_default()
     }
 
     pub fn redactor(&self, env: &str) -> Redactor {
-        Redactor::new(self.secrets_files(env).iter().flat_map(|p| read_env(p)).map(|(_, v)| v))
+        Redactor::new(
+            self.secrets_files(env)
+                .iter()
+                .flat_map(|p| read_env(p))
+                .map(|(_, v)| v),
+        )
     }
 
     /// Replace `{{var}}` with non-secret env values for display; unknown vars stay as-is.

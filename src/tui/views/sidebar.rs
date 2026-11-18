@@ -1,8 +1,8 @@
 //! Request tree (or flat list), with run status per row.
 
-use super::theme::{method_color, panel, short_method, status_color, ACCENT, SPINNER};
-use crate::tui::tree::{basename, Row};
+use super::theme::{ACCENT, SPINNER, method_color, panel, short_method, status_color};
 use crate::tui::app::{App, Focus, Mode};
+use crate::tui::tree::{Row, basename};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -11,8 +11,11 @@ use ratatui::widgets::{List, ListItem};
 
 pub fn draw(app: &mut App, f: &mut Frame, area: Rect) {
     let filtering = app.mode == Mode::Filter || !app.filter.is_empty();
-    let block = panel(app.focus == Focus::Sidebar)
-        .title(format!(" Requests {}/{} ", app.matched.len(), app.requests.len()));
+    let block = panel(app.focus == Focus::Sidebar).title(format!(
+        " Requests {}/{} ",
+        app.matched.len(),
+        app.requests.len()
+    ));
     let inner = block.inner(area);
     f.render_widget(block, area);
     let (list_area, filter_area) = if filtering {
@@ -24,7 +27,9 @@ pub fn draw(app: &mut App, f: &mut Frame, area: Rect) {
     let env = app.env().to_string();
     let spin = SPINNER[app.tick % SPINNER.len()];
     let running_under = |dir: &str| {
-        app.running.keys().any(|(rel, e)| *e == env && rel.starts_with(dir) && rel[dir.len()..].starts_with('/'))
+        app.running
+            .keys()
+            .any(|(rel, e)| *e == env && rel.starts_with(dir) && rel[dir.len()..].starts_with('/'))
     };
     let items: Vec<ListItem> = app
         .rows
@@ -32,7 +37,9 @@ pub fn draw(app: &mut App, f: &mut Frame, area: Rect) {
         .map(|row| {
             let indent = Span::raw("  ".repeat(row.depth()));
             match row {
-                Row::Dir { path, open, count, .. } => {
+                Row::Dir {
+                    path, open, count, ..
+                } => {
                     let arrow = if *open { "▾" } else { "▸" };
                     let mut spans = vec![
                         indent,
@@ -54,8 +61,14 @@ pub fn draw(app: &mut App, f: &mut Frame, area: Rect) {
                     } else {
                         match app.runs.get(&key).and_then(Option::as_ref) {
                             Some(run) => {
-                                let st = run.primary().and_then(|e| e.response.as_ref()).map(|r| r.status);
-                                Span::styled("●", Style::new().fg(st.map(status_color).unwrap_or(Color::Red)))
+                                let st = run
+                                    .primary()
+                                    .and_then(|e| e.response.as_ref())
+                                    .map(|r| r.status);
+                                Span::styled(
+                                    "●",
+                                    Style::new().fg(st.map(status_color).unwrap_or(Color::Red)),
+                                )
                             }
                             None => Span::raw(" "),
                         }
@@ -66,7 +79,10 @@ pub fn draw(app: &mut App, f: &mut Frame, area: Rect) {
                         indent,
                         mark,
                         Span::raw(" "),
-                        Span::styled(format!("{:<4}", short_method(m)), Style::new().fg(method_color(m)).bold()),
+                        Span::styled(
+                            format!("{:<4}", short_method(m)),
+                            Style::new().fg(method_color(m)).bold(),
+                        ),
                         Span::raw(" "),
                         Span::raw(name.to_string()),
                     ]))
@@ -75,14 +91,21 @@ pub fn draw(app: &mut App, f: &mut Frame, area: Rect) {
         })
         .collect();
     let list = List::new(items)
-        .highlight_style(Style::new().bg(Color::Indexed(237)).add_modifier(Modifier::BOLD))
+        .highlight_style(
+            Style::new()
+                .bg(Color::Indexed(237))
+                .add_modifier(Modifier::BOLD),
+        )
         .highlight_symbol("▌");
     f.render_stateful_widget(list, list_area, &mut app.list);
     app.hits.list = list_area;
     if let Some(a) = filter_area {
         let cursor = if app.mode == Mode::Filter { "▏" } else { "" };
         f.render_widget(
-            Line::from(vec![Span::styled("/", Style::new().yellow()), Span::raw(format!("{}{cursor}", app.filter))]),
+            Line::from(vec![
+                Span::styled("/", Style::new().yellow()),
+                Span::raw(format!("{}{cursor}", app.filter)),
+            ]),
             a,
         );
     }

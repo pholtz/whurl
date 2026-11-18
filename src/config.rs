@@ -28,7 +28,8 @@ pub enum SidebarStyle {
 }
 
 impl SidebarStyle {
-    pub const ALL: [SidebarStyle; 3] = [SidebarStyle::Tree, SidebarStyle::Flat, SidebarStyle::Hidden];
+    pub const ALL: [SidebarStyle; 3] =
+        [SidebarStyle::Tree, SidebarStyle::Flat, SidebarStyle::Hidden];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -106,18 +107,31 @@ impl Config {
     }
 
     pub fn load() -> Result<Self> {
-        let Some(path) = Self::path() else { return Ok(Self::default()) };
+        let Some(path) = Self::path() else {
+            return Ok(Self::default());
+        };
         let src = match std::fs::read_to_string(&path) {
             Ok(s) => s,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Self::default()),
             Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
         };
-        let cfg: Self = toml::from_str(&src).with_context(|| format!("parsing {}", path.display()))?;
-        for (name, s, allowed) in
-            [("request", &cfg.request, REQUEST_SECTIONS), ("response", &cfg.response, RESPONSE_SECTIONS)]
-        {
-            if let Some(bad) = s.sections.iter().flatten().find(|x| !allowed.contains(&x.as_str())) {
-                anyhow::bail!("{}: unknown {name} section '{bad}' (have: {})", path.display(), allowed.join(", "));
+        let cfg: Self =
+            toml::from_str(&src).with_context(|| format!("parsing {}", path.display()))?;
+        for (name, s, allowed) in [
+            ("request", &cfg.request, REQUEST_SECTIONS),
+            ("response", &cfg.response, RESPONSE_SECTIONS),
+        ] {
+            if let Some(bad) = s
+                .sections
+                .iter()
+                .flatten()
+                .find(|x| !allowed.contains(&x.as_str()))
+            {
+                anyhow::bail!(
+                    "{}: unknown {name} section '{bad}' (have: {})",
+                    path.display(),
+                    allowed.join(", ")
+                );
             }
         }
         Ok(cfg)
@@ -125,7 +139,9 @@ impl Config {
 
     /// The config path for display, with `$HOME` shown as `~`.
     pub fn display_path() -> String {
-        let Some(p) = Self::path() else { return "(no config location)".into() };
+        let Some(p) = Self::path() else {
+            return "(no config location)".into();
+        };
         match home().and_then(|h| p.strip_prefix(h).ok().map(|r| format!("~/{}", r.display()))) {
             Some(s) => s,
             None => p.display().to_string(),
@@ -138,7 +154,8 @@ impl Config {
 
     /// `-e` / `$HURL_ENV` (already folded into `cli`), then config, then `local`.
     pub fn env(&self, cli: Option<String>) -> String {
-        cli.or_else(|| self.run.default_env.clone()).unwrap_or_else(|| "local".into())
+        cli.or_else(|| self.run.default_env.clone())
+            .unwrap_or_else(|| "local".into())
     }
 }
 
@@ -150,7 +167,8 @@ pub fn save_key(table: &str, key: &str, value: Option<toml_edit::Value>) -> Resu
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
     };
-    let out = set_key(&src, table, key, value).with_context(|| format!("parsing {}", path.display()))?;
+    let out =
+        set_key(&src, table, key, value).with_context(|| format!("parsing {}", path.display()))?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -172,7 +190,10 @@ fn set_key(src: &str, table: &str, key: &str, value: Option<toml_edit::Value>) -
             doc[table][key] = toml_edit::Item::Value(v);
         }
         None => {
-            if let Some(t) = doc.get_mut(table).and_then(toml_edit::Item::as_table_like_mut) {
+            if let Some(t) = doc
+                .get_mut(table)
+                .and_then(toml_edit::Item::as_table_like_mut)
+            {
                 t.remove(key);
             }
         }
@@ -181,7 +202,9 @@ fn set_key(src: &str, table: &str, key: &str, value: Option<toml_edit::Value>) -
 }
 
 fn home() -> Option<PathBuf> {
-    std::env::var_os("HOME").filter(|v| !v.is_empty()).map(PathBuf::from)
+    std::env::var_os("HOME")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
 }
 
 fn expand_tilde(p: &str) -> PathBuf {
@@ -203,8 +226,17 @@ mod tests {
         let out = set_key(src, "ui", "wrap", Some(false.into())).unwrap();
         assert_eq!(out, src.replace("wrap = true", "wrap = false"));
         let out = set_key(&out, "run", "default_env", None).unwrap();
-        assert!(out.contains("# mine") && !out.contains("default_env"), "{out}");
-        let out = set_key("", "response", "sections", Some(toml_edit::Array::from_iter(["body"]).into())).unwrap();
+        assert!(
+            out.contains("# mine") && !out.contains("default_env"),
+            "{out}"
+        );
+        let out = set_key(
+            "",
+            "response",
+            "sections",
+            Some(toml_edit::Array::from_iter(["body"]).into()),
+        )
+        .unwrap();
         assert_eq!(out, "[response]\nsections = [\"body\"]\n");
         let cfg: Config = toml::from_str(&out).unwrap();
         assert_eq!(cfg.response.sections, Some(vec!["body".into()]));

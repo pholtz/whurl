@@ -18,14 +18,16 @@ use theme::{ACCENT, SPINNER};
 
 pub fn draw(app: &mut App, f: &mut Frame) {
     app.hits = Default::default();
-    let [main, foot] = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(f.area());
+    let [main, foot] =
+        Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(f.area());
     let right = if app.show_sidebar {
         let list_w = app.requests.iter().map(|r| r.rel.len()).max().unwrap_or(20) as u16 + 9;
         let list_w = match app.sidebar_w {
             Some(w) => w.clamp(16, main.width.saturating_sub(30).max(16)),
             None => list_w.min(main.width * 2 / 5).max(24),
         };
-        let [left, right] = Layout::horizontal([Constraint::Length(list_w), Constraint::Min(0)]).areas(main);
+        let [left, right] =
+            Layout::horizontal([Constraint::Length(list_w), Constraint::Min(0)]).areas(main);
         app.hits.sidebar = left;
         sidebar::draw(app, f, left);
         right
@@ -33,7 +35,8 @@ pub fn draw(app: &mut App, f: &mut Frame) {
         main
     };
     app.hits.main = right;
-    let [summary, content] = Layout::vertical([Constraint::Length(6), Constraint::Min(0)]).areas(right);
+    let [summary, content] =
+        Layout::vertical([Constraint::Length(6), Constraint::Min(0)]).areas(right);
     summary::draw(app, f, summary);
     content::draw(app, f, content);
     draw_footer(app, f, foot);
@@ -57,11 +60,20 @@ fn state_line(app: &App) -> Line<'static> {
     let mut spans = vec![];
     if !app.running.is_empty() {
         spans.push(Span::styled(
-            format!("{} {} running  ", SPINNER[app.tick % SPINNER.len()], app.running.len()),
+            format!(
+                "{} {} running  ",
+                SPINNER[app.tick % SPINNER.len()],
+                app.running.len()
+            ),
             Style::new().yellow(),
         ));
     }
-    let ws = app.ws.root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let ws = app
+        .ws
+        .root
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     spans.extend([
         Span::styled(format!("{ws}  "), Style::new().dark_gray()),
         if app.asserts {
@@ -84,9 +96,20 @@ fn draw_footer(app: &App, f: &mut Frame, area: Rect) {
     let sep = || Span::styled(" · ", Style::new().dark_gray());
     let mut hints = Line::from(Span::raw(" "));
     let keys: &[(&str, &str)] = if app.show_sidebar {
-        &[("enter", "run"), (":", "command"), ("?", "help"), ("q", "quit")]
+        &[
+            ("enter", "run"),
+            (":", "command"),
+            ("?", "help"),
+            ("q", "quit"),
+        ]
     } else {
-        &[("enter", "run"), ("/", "find"), (":", "command"), ("?", "help"), ("q", "quit")]
+        &[
+            ("enter", "run"),
+            ("/", "find"),
+            (":", "command"),
+            ("?", "help"),
+            ("q", "quit"),
+        ]
     };
     for (i, &(k, v)) in keys.iter().enumerate() {
         if i > 0 {
@@ -98,15 +121,23 @@ fn draw_footer(app: &App, f: &mut Frame, area: Rect) {
     let state = state_line(app);
     let state_w = state.width() + 1;
     if app.mode == Mode::Command {
-        let [l, r] = Layout::horizontal([Constraint::Min(0), Constraint::Length(state_w as u16)]).areas(area);
+        let [l, r] = Layout::horizontal([Constraint::Min(0), Constraint::Length(state_w as u16)])
+            .areas(area);
         f.render_widget(cmdline::input(app), l);
         return f.render_widget(state, r);
     }
-    let toast = app.flash.as_ref().filter(|(_, _, at)| at.elapsed() < Duration::from_secs(4));
+    let toast = app
+        .flash
+        .as_ref()
+        .filter(|(_, _, at)| at.elapsed() < Duration::from_secs(4));
     let left = match toast {
         None => hints,
         Some((msg, err, _)) => {
-            let style = if *err { Style::new().red() } else { Style::new().green() };
+            let style = if *err {
+                Style::new().red()
+            } else {
+                Style::new().green()
+            };
             let msg = msg.lines().next().unwrap_or_default();
             let need = MIN_TOAST.min(msg.chars().count());
             let after_hints = width.saturating_sub(hints.width() + 3 + state_w + 1);
@@ -118,13 +149,17 @@ fn draw_footer(app: &App, f: &mut Frame, area: Rect) {
             } else if alone >= need {
                 Line::from(Span::styled(format!(" {}", ellipsize(msg, alone)), style))
             } else {
-                let line = Line::from(Span::styled(format!(" {}", ellipsize(msg, width.saturating_sub(1))), style));
+                let line = Line::from(Span::styled(
+                    format!(" {}", ellipsize(msg, width.saturating_sub(1))),
+                    style,
+                ));
                 return f.render_widget(line, area);
             }
         }
     };
     // The env badge wins over hints: they are clipped, it never is.
-    let [l, r] = Layout::horizontal([Constraint::Min(0), Constraint::Length(state_w as u16)]).areas(area);
+    let [l, r] =
+        Layout::horizontal([Constraint::Min(0), Constraint::Length(state_w as u16)]).areas(area);
     f.render_widget(left, l);
     f.render_widget(state, r);
 }

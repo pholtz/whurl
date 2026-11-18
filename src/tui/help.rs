@@ -3,8 +3,8 @@
 
 use super::app::{App, Mode};
 use super::commands::COMMANDS;
-use crate::config::{Config, Sections, SidebarStyle, REQUEST_SECTIONS, RESPONSE_SECTIONS};
 use super::commands::Command;
+use crate::config::{Config, REQUEST_SECTIONS, RESPONSE_SECTIONS, Sections, SidebarStyle};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -35,19 +35,29 @@ pub fn matches(query: &str) -> Vec<&'static Command> {
     }
     let rank = |c: &Command| {
         let keys = c.key_labels().to_lowercase();
-        let hay = format!("{keys} {} {} {}", c.id, c.desc.to_lowercase(), c.scope.title().to_lowercase());
+        let hay = format!(
+            "{keys} {} {} {}",
+            c.id,
+            c.desc.to_lowercase(),
+            c.scope.title().to_lowercase()
+        );
         if !q.split_whitespace().all(|w| hay.contains(w)) {
             return None;
         }
-        Some(if keys.split(' ').any(|k| k == q || k == format!(":{q}")) || c.id == q {
-            0
-        } else if c.id.starts_with(&q) || keys.split(' ').any(|k| k.starts_with(&q)) {
-            1
-        } else {
-            2
-        })
+        Some(
+            if keys.split(' ').any(|k| k == q || k == format!(":{q}")) || c.id == q {
+                0
+            } else if c.id.starts_with(&q) || keys.split(' ').any(|k| k.starts_with(&q)) {
+                1
+            } else {
+                2
+            },
+        )
     };
-    let mut out: Vec<(u8, &Command)> = COMMANDS.iter().filter_map(|c| rank(c).map(|r| (r, c))).collect();
+    let mut out: Vec<(u8, &Command)> = COMMANDS
+        .iter()
+        .filter_map(|c| rank(c).map(|r| (r, c)))
+        .collect();
     out.sort_by_key(|(r, _)| *r);
     out.into_iter().map(|(_, c)| c).collect()
 }
@@ -83,13 +93,22 @@ impl Group {
     /// Shown sections in display order.
     fn enabled(self, cfg: &Config) -> Vec<&'static str> {
         let allowed = self.allowed();
-        self.sections(cfg).or(allowed).iter().filter_map(|s| allowed.iter().find(|a| *a == s).copied()).collect()
+        self.sections(cfg)
+            .or(allowed)
+            .iter()
+            .filter_map(|s| allowed.iter().find(|a| *a == s).copied())
+            .collect()
     }
 
     /// Shown sections in order, then hidden ones.
     fn order(self, cfg: &Config) -> Vec<&'static str> {
         let mut out = self.enabled(cfg);
-        let hidden: Vec<_> = self.allowed().iter().filter(|a| !out.contains(a)).copied().collect();
+        let hidden: Vec<_> = self
+            .allowed()
+            .iter()
+            .filter(|a| !out.contains(a))
+            .copied()
+            .collect();
         out.extend(hidden);
         out
     }
@@ -108,7 +127,14 @@ pub enum Setting {
 }
 
 pub fn settings(cfg: &Config) -> Vec<Setting> {
-    let mut out = vec![Setting::Sidebar, Setting::Wrap, Setting::AutoSwitch, Setting::Mouse, Setting::Asserts, Setting::DefaultEnv];
+    let mut out = vec![
+        Setting::Sidebar,
+        Setting::Wrap,
+        Setting::AutoSwitch,
+        Setting::Mouse,
+        Setting::Asserts,
+        Setting::DefaultEnv,
+    ];
     for g in [Group::Request, Group::Response] {
         out.extend(g.order(cfg).into_iter().map(|s| Setting::Section(g, s)));
     }
@@ -218,8 +244,13 @@ pub fn on_key(app: &mut App, k: &KeyEvent) {
             app.help.typing = true;
             return;
         }
-        KeyCode::Char('n' | 'j') if ctrl && searching => return app.help.cmd = (app.help.cmd + 1).min(matches(&app.help.query).len().saturating_sub(1)),
-        KeyCode::Char('p' | 'k') if ctrl && searching => return app.help.cmd = app.help.cmd.saturating_sub(1),
+        KeyCode::Char('n' | 'j') if ctrl && searching => {
+            return app.help.cmd =
+                (app.help.cmd + 1).min(matches(&app.help.query).len().saturating_sub(1));
+        }
+        KeyCode::Char('p' | 'k') if ctrl && searching => {
+            return app.help.cmd = app.help.cmd.saturating_sub(1);
+        }
         KeyCode::Esc | KeyCode::Char('?' | 'q') => return app.mode = Mode::Normal,
         KeyCode::Tab | KeyCode::BackTab => {
             app.help.tab = match app.help.tab {
@@ -260,7 +291,9 @@ pub fn on_key(app: &mut App, k: &KeyEvent) {
             _ => {}
         },
         HelpTab::Config => {
-            let Some(s) = settings(&app.cfg).get(app.help.cfg).cloned() else { return };
+            let Some(s) = settings(&app.cfg).get(app.help.cfg).cloned() else {
+                return;
+            };
             match k.code {
                 KeyCode::Left => change(app, &s, Change::Off),
                 KeyCode::Right => change(app, &s, Change::On),
@@ -292,15 +325,26 @@ fn change(app: &mut App, s: &Setting, c: Change) {
     let on_off = |v: bool| if v { "on" } else { "off" }.to_string();
     let cfg = &app.cfg;
     let (key, value) = match s {
-        Setting::Sidebar => ("ui.sidebar", cycle(&SidebarStyle::ALL, &cfg.ui.sidebar, c).name().to_string()),
+        Setting::Sidebar => (
+            "ui.sidebar",
+            cycle(&SidebarStyle::ALL, &cfg.ui.sidebar, c)
+                .name()
+                .to_string(),
+        ),
         Setting::Wrap => ("ui.wrap", on_off(set(cfg.ui.wrap, c))),
-        Setting::AutoSwitch => ("ui.auto_switch_response", on_off(set(cfg.ui.auto_switch_response, c))),
+        Setting::AutoSwitch => (
+            "ui.auto_switch_response",
+            on_off(set(cfg.ui.auto_switch_response, c)),
+        ),
         Setting::Mouse => ("ui.mouse", on_off(set(cfg.ui.mouse, c))),
         Setting::Asserts => ("run.asserts", on_off(set(cfg.run.asserts, c))),
         Setting::DefaultEnv => {
             let mut opts: Vec<Option<String>> = vec![None];
             opts.extend(app.envs.iter().cloned().map(Some));
-            ("run.default_env", cycle(&opts, &cfg.run.default_env, c).unwrap_or_else(|| "unset".into()))
+            (
+                "run.default_env",
+                cycle(&opts, &cfg.run.default_env, c).unwrap_or_else(|| "unset".into()),
+            )
         }
         Setting::Section(g, name) => {
             let on = g.enabled(cfg).contains(name);
@@ -309,8 +353,17 @@ fn change(app: &mut App, s: &Setting, c: Change) {
                 return;
             }
             // Keep the displayed order, flipping just this one.
-            let list: Vec<&str> =
-                g.order(cfg).into_iter().filter(|s| if s == name { want } else { g.enabled(cfg).contains(s) }).collect();
+            let list: Vec<&str> = g
+                .order(cfg)
+                .into_iter()
+                .filter(|s| {
+                    if s == name {
+                        want
+                    } else {
+                        g.enabled(cfg).contains(s)
+                    }
+                })
+                .collect();
             write_sections(app, *g, list);
             // Rows are enabled-then-hidden, so the selection follows the moved row.
             let rows = settings(&app.cfg);

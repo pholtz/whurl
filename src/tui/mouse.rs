@@ -2,7 +2,9 @@
 
 use super::app::{App, Focus, Mode};
 use super::tree::Row;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::crossterm::event::{
+    KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use ratatui::layout::Position;
 
 pub fn on_mouse(app: &mut App, m: MouseEvent) {
@@ -20,7 +22,11 @@ pub fn on_mouse(app: &mut App, m: MouseEvent) {
     let in_main = app.hits.main.contains(pos);
     match m.kind {
         MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
-            let d = if m.kind == MouseEventKind::ScrollDown { 1 } else { -1 };
+            let d = if m.kind == MouseEventKind::ScrollDown {
+                1
+            } else {
+                -1
+            };
             if in_sidebar {
                 app.move_sel(d);
             } else if in_main {
@@ -30,7 +36,9 @@ pub fn on_mouse(app: &mut App, m: MouseEvent) {
         MouseEventKind::ScrollRight if in_main => app.scroll_h(8),
         MouseEventKind::ScrollLeft if in_main => app.scroll_h(-8),
         // The sidebar's right border is a handle: drag it to resize.
-        MouseEventKind::Down(MouseButton::Left) if in_sidebar && pos.x + 1 == app.hits.sidebar.right() => {
+        MouseEventKind::Down(MouseButton::Left)
+            if in_sidebar && pos.x + 1 == app.hits.sidebar.right() =>
+        {
             app.dragging = true;
         }
         MouseEventKind::Drag(MouseButton::Left) if app.dragging => {

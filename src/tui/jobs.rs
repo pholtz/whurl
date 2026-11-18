@@ -33,7 +33,14 @@ pub struct Job {
 }
 
 impl Job {
-    pub fn start(id: u64, key: Key, ws: &Workspace, req: RequestFile, opts: RunOpts, tx: Sender<Msg>) -> Self {
+    pub fn start(
+        id: u64,
+        key: Key,
+        ws: &Workspace,
+        req: RequestFile,
+        opts: RunOpts,
+        tx: Sender<Msg>,
+    ) -> Self {
         let cancel = Arc::new(AtomicBool::new(false));
         let flag = cancel.clone();
         let root = ws.root.clone();
@@ -42,7 +49,12 @@ impl Job {
             let outcome = work(&ws, &req, &opts, &flag);
             let _ = tx.send(Msg { id, key, outcome });
         });
-        Job { id, started: Instant::now(), cancel, handle: Some(handle) }
+        Job {
+            id,
+            started: Instant::now(),
+            cancel,
+            handle: Some(handle),
+        }
     }
 
     pub fn cancel(&self) {
