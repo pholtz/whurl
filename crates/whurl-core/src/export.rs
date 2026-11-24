@@ -1,7 +1,42 @@
 //! Shared formatting plus the Markdown export meant for handing a run to an agent.
 
 use crate::run::{Entry, Header, Run};
+use crate::workspace::Workspace;
 use std::fmt::Write;
+use std::path::PathBuf;
+
+/// A run as pretty JSON or as Markdown with its hurl source.
+pub fn render(run: &Run, json: bool) -> String {
+    if json {
+        serde_json::to_string_pretty(run).unwrap_or_default() + "\n"
+    } else {
+        markdown(run, std::fs::read_to_string(&run.file).ok().as_deref())
+    }
+}
+
+/// Write `render(run, json)` to `.whurl/exports/<run id>.{json,md}`.
+pub fn save(ws: &Workspace, run: &Run, json: bool) -> std::io::Result<PathBuf> {
+    let dir = ws.state_dir().join("exports");
+    let path = dir.join(format!("{}.{}", run.id, if json { "json" } else { "md" }));
+    std::fs::create_dir_all(&dir)?;
+    std::fs::write(&path, render(run, json))?;
+    Ok(path)
+}
+
+/// One line for a finished run: `200 in 41ms`.
+pub fn summary(run: &Run) -> String {
+    match run.primary() {
+        Some(e) => match &e.response {
+            Some(resp) => format!(
+                "{} in {}",
+                resp.status,
+                e.total_us().map(ms).unwrap_or_default()
+            ),
+            None => "no response".into(),
+        },
+        None => "no entries".into(),
+    }
+}
 
 pub fn ms(us: u64) -> String {
     if us >= 10_000_000 {

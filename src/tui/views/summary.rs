@@ -15,7 +15,7 @@ use ratatui::widgets::{Padding, Paragraph};
 pub fn draw(app: &App, f: &mut Frame, area: Rect) {
     let Some(req) = app.current() else {
         let title = match app.row() {
-            Some(crate::tui::tree::Row::Dir { path, .. }) => format!(" {path}/ "),
+            Some(whurl_core::tree::Row::Dir { path, .. }) => format!(" {path}/ "),
             _ => " no requests ".into(),
         };
         f.render_widget(panel(false).title(title), area);

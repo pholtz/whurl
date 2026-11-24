@@ -1,11 +1,8 @@
 mod completion;
-mod config;
-mod export;
 mod print;
-mod run;
-mod store;
 mod tui;
-mod workspace;
+
+use whurl_core::{config, export, run, store, workspace};
 
 use anyhow::Result;
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
@@ -139,7 +136,7 @@ struct OutArgs {
     no_body: bool,
 }
 
-#[derive(Clone, Copy, ValueEnum)]
+#[derive(Clone, Copy, PartialEq, ValueEnum)]
 enum Format {
     Md,
     Json,
@@ -188,7 +185,7 @@ fn real_main() -> Result<()> {
             output,
         }) => {
             let r = store::find(&ws, &run)?;
-            let text = render_export(&r, format);
+            let text = export::render(&r, format == Format::Json);
             match output {
                 Some(p) => {
                     std::fs::write(&p, text)?;
@@ -240,13 +237,6 @@ fn list(ws: &Workspace, query: &str, json: bool) -> Result<()> {
     Ok(())
 }
 
-fn render_export(r: &run::Run, format: Format) -> String {
-    match format {
-        Format::Json => serde_json::to_string_pretty(r).unwrap_or_default() + "\n",
-        Format::Md => export::markdown(r, std::fs::read_to_string(&r.file).ok().as_deref()),
-    }
-}
-
 fn run_cmd(ws: &Workspace, cfg: &config::Config, a: RunArgs) -> Result<()> {
     let req = ws.resolve(&a.target)?;
     let env = cfg.env(a.env.env);
@@ -272,7 +262,7 @@ fn run_cmd(ws: &Workspace, cfg: &config::Config, a: RunArgs) -> Result<()> {
         } else {
             Format::Md
         };
-        std::fs::write(p, render_export(&r, fmt))?;
+        std::fs::write(p, export::render(&r, fmt == Format::Json))?;
         eprintln!("{}", print::green(&format!("exported {}", p.display())));
     }
     output(ws, &r, &a.out)?;
@@ -284,9 +274,9 @@ fn run_cmd(ws: &Workspace, cfg: &config::Config, a: RunArgs) -> Result<()> {
 
 fn output(_ws: &Workspace, r: &run::Run, out: &OutArgs) -> Result<()> {
     if out.json {
-        print!("{}", render_export(r, Format::Json));
+        print!("{}", export::render(r, true));
     } else if out.md {
-        print!("{}", render_export(r, Format::Md));
+        print!("{}", export::render(r, false));
     } else if out.body {
         if let Some(b) = r
             .primary()

@@ -2,12 +2,12 @@
 
 use super::theme::{ACCENT, SPINNER, method_color, panel, short_method, status_color};
 use crate::tui::app::{App, Focus, Mode};
-use crate::tui::tree::{Row, basename};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem};
+use whurl_core::tree::{Row, basename};
 
 pub fn draw(app: &mut App, f: &mut Frame, area: Rect) {
     let filtering = app.mode == Mode::Filter || !app.filter.is_empty();

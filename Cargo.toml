@@ -3,14 +3,16 @@ name = "whurl"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+members = ["crates/whurl-core"]
+exclude = ["crates/whurl-gui"]
+
 [dependencies]
+whurl-core = { path = "crates/whurl-core" }
 anyhow = "1.0.104"
 chrono = "0.4.45"
 clap = { version = "4.6.7", features = ["derive", "env"] }
 clap_complete = { version = "4.6.12", features = ["unstable-dynamic"] }
 ratatui = { version = "0.30.2", features = ["unstable-rendered-line-info"] }
-serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["preserve_order", "arbitrary_precision"] }
 tempfile = "3.27.0"
-toml = "0.9"
-toml_edit = "0.23"

@@ -64,7 +64,7 @@ pub fn draw(app: &mut App, f: &mut Frame, area: Rect) {
     // A folder gets a pseudo key (the trailing `/` can't clash with a request) so its hint shows.
     let key = match (app.key(), app.row()) {
         (Some(k), _) => k,
-        (None, Some(crate::tui::tree::Row::Dir { path, .. })) => {
+        (None, Some(whurl_core::tree::Row::Dir { path, .. })) => {
             (format!("{path}/"), String::new())
         }
         _ => return,
@@ -168,7 +168,7 @@ fn hint(s: &str) -> Line<'static> {
 }
 
 fn build_lines(app: &App, width: u16) -> Vec<Line<'static>> {
-    if let Some(crate::tui::tree::Row::Dir { path, count, .. }) = app.row() {
+    if let Some(whurl_core::tree::Row::Dir { path, count, .. }) = app.row() {
         return vec![
             Line::from(Span::styled(format!("{path}/"), Style::new().bold())),
             Line::default(),

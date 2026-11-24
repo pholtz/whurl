@@ -5,11 +5,8 @@ mod clipboard;
 mod cmdline;
 mod commands;
 mod help;
-mod jobs;
 mod mouse;
 mod settings;
-mod state;
-mod tree;
 mod views;
 
 use crate::config::Config;

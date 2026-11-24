@@ -1,15 +1,16 @@
 //! Background runs. Each job is a thread that owns the hurl child, polls it, and kills it when
-//! its cancel flag is set. Results come back over a channel tagged with the job id, so a late
-//! message from a cancelled job can't clobber a newer run of the same request.
+//! its cancel flag is set. Results go to the frontend's callback tagged with the job id, so a
+//! late message from a cancelled job can't clobber a newer run of the same request.
 
-use super::app::Key;
 use crate::run::{self, Run, RunOpts};
 use crate::workspace::{RequestFile, Workspace};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Sender;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
+
+/// (request name, env): runs are tracked and cached per request per env.
+pub type Key = (String, String);
 
 const POLL: Duration = Duration::from_millis(5);
 
@@ -39,7 +40,7 @@ impl Job {
         ws: &Workspace,
         req: RequestFile,
         opts: RunOpts,
-        tx: Sender<Msg>,
+        done: impl FnOnce(Msg) + Send + 'static,
     ) -> Self {
         let cancel = Arc::new(AtomicBool::new(false));
         let flag = cancel.clone();
@@ -47,7 +48,7 @@ impl Job {
         let handle = std::thread::spawn(move || {
             let ws = Workspace { root };
             let outcome = work(&ws, &req, &opts, &flag);
-            let _ = tx.send(Msg { id, key, outcome });
+            done(Msg { id, key, outcome });
         });
         Job {
             id,
