@@ -2,14 +2,6 @@
 
 use super::cmdline::CmdLine;
 use super::help::Help;
-use super::jobs::{Job, Msg, Outcome};
-use super::state::UiState;
-use super::tree::{self, Row, Sel};
-use crate::config::Config;
-use crate::config::SidebarStyle;
-use crate::run::{Entry, Run, RunOpts};
-use crate::store;
-use crate::workspace::{RequestFile, Workspace, search};
 use ratatui::layout::Rect;
 use ratatui::text::Line;
 use ratatui::widgets::ListState;
@@ -17,6 +9,16 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Instant;
+use whurl_core::body::{self, Side};
+use whurl_core::config::{Config, SidebarStyle};
+use whurl_core::jobs::{Job, Msg, Outcome};
+use whurl_core::run::{Entry, Run, RunOpts};
+use whurl_core::state::UiState;
+use whurl_core::tree::{self, Row, Sel};
+use whurl_core::workspace::{RequestFile, Workspace, search};
+use whurl_core::{export, requests, store};
+
+pub use whurl_core::jobs::Key;
 
 pub const HISTORY: usize = 30;
 
@@ -56,9 +58,6 @@ pub enum Focus {
     Sidebar,
     Main,
 }
-
-/// (request name, env)
-pub type Key = (String, String);
 
 /// Everything the main pane's lines depend on; a change rebuilds them.
 #[derive(PartialEq, Clone)]
@@ -511,14 +510,10 @@ impl App {
             extra_args: vec![],
         };
         self.next_job += 1;
-        let job = Job::start(
-            self.next_job,
-            key.clone(),
-            &self.ws,
-            req,
-            opts,
-            self.tx.clone(),
-        );
+        let tx = self.tx.clone();
+        let job = Job::start(self.next_job, key.clone(), &self.ws, req, opts, move |m| {
+            let _ = tx.send(m);
+        });
         self.running.insert(key, job);
         self.view = None;
     }
@@ -534,7 +529,7 @@ impl App {
         let selected = self.key().as_ref() == Some(&key);
         match outcome {
             Outcome::Done(r) => {
-                let summary = summary_text(&r);
+                let summary = export::summary(&r);
                 if let Some(us) = r.primary().and_then(Entry::total_us) {
                     let l = self.latencies.entry(key.clone()).or_default();
                     l.push(us);
@@ -757,47 +752,22 @@ impl App {
         let Some(r) = self.current_run().cloned() else {
             return self.say("nothing to export: run the request first", true);
         };
-        let dir = self.ws.state_dir().join("exports");
-        let path = dir.join(format!("{}.{}", r.id, if json { "json" } else { "md" }));
-        let text = if json {
-            serde_json::to_string_pretty(&r).unwrap_or_default()
-        } else {
-            crate::export::markdown(&r, std::fs::read_to_string(&r.file).ok().as_deref())
-        };
-        match std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, text)) {
-            Ok(()) => self.say(format!("exported {}", path.display()), false),
+        match export::save(&self.ws, &r, json) {
+            Ok(path) => self.say(format!("exported {}", path.display()), false),
             Err(e) => self.say(format!("export failed: {e}"), true),
         }
     }
 
-    /// `v`: the Request tab shows the request body, every other tab the response body.
-    /// The body `v` and `y` act on: the request body on the Request tab, else the response
-    /// body, pretty-printed (already redacted), with an extension for its type.
-    fn tab_body(&self) -> Result<TabBody, String> {
+    /// The body `v` and `y` act on: the request body on the Request tab, else the response.
+    fn tab_body(&self) -> Result<body::Body, String> {
         let e = self
             .current_entry()
             .ok_or("no run yet: press enter first")?;
-        let (body, headers, what) = match (self.tab, &e.response) {
-            (Tab::Request, _) => (e.request.body.as_deref(), &e.request.headers, "request"),
-            (_, Some(r)) if r.binary => {
-                return Err("binary response body: export it instead".into());
-            }
-            (_, Some(r)) => (r.body.as_deref(), &r.headers, "response"),
-            (_, None) => return Err("no response".into()),
+        let side = match self.tab {
+            Tab::Request => Side::Request,
+            _ => Side::Response,
         };
-        let body = body
-            .filter(|b| !b.is_empty())
-            .ok_or_else(|| format!("empty {what} body"))?;
-        let ctype = headers
-            .iter()
-            .find(|h| h.name.eq_ignore_ascii_case("content-type"))
-            .map(|h| h.value.as_str());
-        Ok(TabBody {
-            text: crate::export::pretty(body),
-            ext: extension(ctype, body),
-            what,
-            truncated: what == "response" && e.response.as_ref().is_some_and(|r| r.truncated),
-        })
+        body::of(e, side)
     }
 
     /// `v`: open the body in the viewer.
@@ -831,7 +801,7 @@ impl App {
         };
         match super::clipboard::copy(&b.text) {
             Ok(via) => {
-                let size = crate::export::bytes(b.text.len() as u64);
+                let size = export::bytes(b.text.len() as u64);
                 let note = if b.truncated {
                     " (truncated when stored)"
                 } else {
@@ -948,14 +918,8 @@ impl App {
             .current()
             .cloned()
             .ok_or("select a request to duplicate")?;
-        let rel = request_name(name)?;
-        let path = self.ws.requests_dir().join(format!("{rel}.hurl"));
-        if path.exists() {
-            return Err(format!("{rel} already exists"));
-        }
-        std::fs::create_dir_all(path.parent().unwrap_or(&path))
-            .and_then(|_| std::fs::copy(&req.path, &path))
-            .map_err(|e| format!("duplicate: {e}"))?;
+        let rel = requests::name(name).map_err(|e| format!("{e:#}"))?;
+        let path = requests::duplicate(&self.ws, &req, &rel).map_err(|e| format!("{e:#}"))?;
         self.reload();
         self.select_rel(&rel);
         self.edit = Some(path);
@@ -979,11 +943,10 @@ impl App {
         ) {
             return;
         }
-        if let Err(e) = std::fs::remove_file(&req.path) {
-            return self.say(format!("delete: {e}"), true);
-        }
-        self.prune_dirs(&req.rel);
-        let removed = store::remove(&self.ws, &req.rel);
+        let removed = match requests::delete(&self.ws, &req) {
+            Ok(r) => r,
+            Err(e) => return self.say(format!("{e:#}"), true),
+        };
         self.runs.retain(|k, _| k.0 != req.rel);
         self.latencies.retain(|k, _| k.0 != req.rel);
         // Land on the row that took its place.
@@ -997,42 +960,17 @@ impl App {
         match removed {
             Ok(_) => self.say(format!("deleted {}", req.rel), false),
             Err(e) => self.say(
-                format!("deleted {}, but not its history: {e}", req.rel),
+                format!("deleted {}, but not its history: {e:#}", req.rel),
                 true,
             ),
         }
     }
 
-    /// Remove folders above `rel` that are now empty (remove_dir refuses non-empty ones).
-    fn prune_dirs(&self, rel: &str) {
-        let dir = self.ws.requests_dir();
-        for d in tree::ancestors(rel).collect::<Vec<_>>().into_iter().rev() {
-            let _ = std::fs::remove_dir(dir.join(d));
-        }
-    }
-
     /// Create `requests/<name>.hurl` from a stub, select it, and open it in the editor.
     pub fn new_request(&mut self, name: &str) -> Result<(), String> {
-        let rel = request_name(name)?;
-        let path = self.ws.requests_dir().join(format!("{rel}.hurl"));
-        if path.exists() {
-            return Err(format!("{rel} already exists"));
-        }
-        // Start from the selected request's base URL variable, e.g. `{{api_url}}`.
-        let base = self
-            .current()
-            .and_then(|r| r.primary())
-            .and_then(|e| {
-                e.url
-                    .starts_with("{{")
-                    .then(|| e.url.find("}}").map(|i| e.url[..i + 2].to_string()))
-                    .flatten()
-            })
-            .unwrap_or_else(|| "https://example.com".into());
-        let stub = format!("# {}\nGET {base}/\n", tree::basename(&rel));
-        std::fs::create_dir_all(path.parent().unwrap_or(&path))
-            .and_then(|_| std::fs::write(&path, stub))
-            .map_err(|e| format!("new {rel}: {e}"))?;
+        let rel = requests::name(name).map_err(|e| format!("{e:#}"))?;
+        let path =
+            requests::create(&self.ws, &rel, self.current()).map_err(|e| format!("{e:#}"))?;
         self.reload();
         self.select_rel(&rel);
         self.created = Some(path.clone());
@@ -1046,29 +984,23 @@ impl App {
             .current()
             .cloned()
             .ok_or("select a request to rename")?;
-        let rel = request_name(name)?;
+        let rel = requests::name(name).map_err(|e| format!("{e:#}"))?;
         if rel == req.rel {
             return Ok(());
         }
         if self.running.keys().any(|(r, _)| *r == req.rel) {
             return Err(format!("{} is running", req.rel));
         }
-        let dir = self.ws.requests_dir();
-        let path = dir.join(format!("{rel}.hurl"));
-        if path.exists() {
-            return Err(format!("{rel} already exists"));
-        }
-        std::fs::create_dir_all(path.parent().unwrap_or(&path))
-            .and_then(|_| std::fs::rename(&req.path, &path))
-            .map_err(|e| format!("rename: {e}"))?;
-        self.prune_dirs(&req.rel);
-        let moved = store::rename(&self.ws, &req.rel, &rel, &path);
+        let Some(renamed) = requests::rename(&self.ws, &req, &rel).map_err(|e| format!("{e:#}"))?
+        else {
+            return Ok(());
+        };
         self.runs.retain(|k, _| k.0 != req.rel);
         self.latencies.retain(|k, _| k.0 != req.rel);
         self.reload();
         self.select_rel(&rel);
         self.save_state();
-        match moved {
+        match renamed.history {
             Ok(n) => self.say(
                 format!(
                     "renamed {} → {rel}{}",
@@ -1083,7 +1015,7 @@ impl App {
             ),
             Err(e) => self.say(
                 format!(
-                    "renamed {} → {rel}, but history was not moved: {e}",
+                    "renamed {} → {rel}, but history was not moved: {e:#}",
                     req.rel
                 ),
                 true,
@@ -1096,27 +1028,6 @@ impl App {
         self.reload();
         self.say(format!("reloaded {} requests", self.requests.len()), false);
     }
-}
-
-/// A request name from user input: `dir/name`, `.hurl` and a leading `/` optional.
-fn request_name(input: &str) -> Result<String, String> {
-    let s = input.trim().trim_start_matches('/');
-    let s = s.strip_prefix("requests/").unwrap_or(s);
-    let s = s.strip_suffix(".hurl").unwrap_or(s);
-    let ok = |p: &str| !p.is_empty() && p != "." && p != ".." && !p.starts_with('.');
-    if s.is_empty() || !s.split('/').all(ok) || s.contains(char::is_whitespace) {
-        return Err(format!(
-            "not a request name: '{input}' (want e.g. folder/name)"
-        ));
-    }
-    Ok(s.to_string())
-}
-
-struct TabBody {
-    text: String,
-    ext: &'static str,
-    what: &'static str,
-    truncated: bool,
 }
 
 /// `viewer.command`, else `$VISUAL`/`$EDITOR` (read-only where the editor has a flag for it),
@@ -1143,41 +1054,5 @@ fn viewer_command(configured: &str) -> String {
         "vi" | "vim" | "nvim" | "view" | "gvim" | "mvim" => format!("{ed} -R"),
         "nano" => format!("{ed} -v"),
         _ => ed,
-    }
-}
-
-/// File extension for a body, so the viewer picks the right syntax.
-fn extension(ctype: Option<&str>, body: &str) -> &'static str {
-    let c = ctype.unwrap_or_default().to_lowercase();
-    let by_type = [
-        ("json", "json"),
-        ("html", "html"),
-        ("xml", "xml"),
-        ("javascript", "js"),
-        ("css", "css"),
-        ("csv", "csv"),
-        ("yaml", "yaml"),
-        ("graphql", "graphql"),
-        ("x-www-form-urlencoded", "txt"),
-        ("text/plain", "txt"),
-    ];
-    match by_type.iter().find(|(k, _)| c.contains(k)) {
-        Some((_, ext)) => ext,
-        None if crate::export::is_json(body) => "json",
-        None => "txt",
-    }
-}
-
-fn summary_text(r: &Run) -> String {
-    match r.primary() {
-        Some(e) => match &e.response {
-            Some(resp) => format!(
-                "{} in {}",
-                resp.status,
-                e.total_us().map(crate::export::ms).unwrap_or_default()
-            ),
-            None => "no response".into(),
-        },
-        None => "no entries".into(),
     }
 }

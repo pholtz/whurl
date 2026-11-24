@@ -289,7 +289,7 @@ fn complete_dirs(app: &App, args: &[&str], _: &str) -> Vec<(String, String, bool
     let mut dirs: Vec<&str> = app
         .requests
         .iter()
-        .flat_map(|r| super::tree::ancestors(&r.rel))
+        .flat_map(|r| whurl_core::tree::ancestors(&r.rel))
         .collect();
     dirs.sort_unstable();
     dirs.dedup();

@@ -1989,6 +1989,17 @@ dependencies = [
  "clap",
  "clap_complete",
  "ratatui",
+ "serde_json",
+ "tempfile",
+ "whurl-core",
+]
+
+[[package]]
+name = "whurl-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
  "serde",
  "serde_json",
  "tempfile",

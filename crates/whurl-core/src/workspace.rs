@@ -5,7 +5,8 @@ use anyhow::{Context, Result, bail};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const METHODS: &[&str] = &[
+/// HTTP methods hurl accepts on a request line.
+pub const METHODS: &[&str] = &[
     "GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH", "LINK",
     "UNLINK", "PURGE", "LOCK", "UNLOCK", "PROPFIND", "VIEW", "QUERY",
 ];
@@ -52,7 +53,7 @@ impl RequestFile {
             path: path.to_path_buf(),
             rel,
             title,
-            entries: parse_entries(&src),
+            entries: entries(&src),
         })
     }
 
@@ -62,7 +63,8 @@ impl RequestFile {
     }
 }
 
-fn parse_entries(src: &str) -> Vec<EntryLine> {
+/// The request lines in a `.hurl` source, skipping fenced bodies.
+pub fn entries(src: &str) -> Vec<EntryLine> {
     let mut out = Vec::new();
     let mut in_fence = false;
     for (i, line) in src.lines().enumerate() {
@@ -339,7 +341,7 @@ mod tests {
     #[test]
     fn entries_skip_bodies() {
         let src = "# t\nGET {{h}}/a\nX: 1\n```\nPOST not/a/request\n```\nHTTP *\n\nPOST {{h}}/b\n";
-        let e = parse_entries(src);
+        let e = entries(src);
         assert_eq!(e.len(), 2);
         assert_eq!((e[1].method.as_str(), e[1].line), ("POST", 9));
     }

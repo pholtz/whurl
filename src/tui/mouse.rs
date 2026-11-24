@@ -1,11 +1,11 @@
 //! Mouse events (with `ui.mouse` on), routed by where the last frame drew each pane.
 
 use super::app::{App, Focus, Mode};
-use super::tree::Row;
 use ratatui::crossterm::event::{
     KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use ratatui::layout::Position;
+use whurl_core::tree::Row;
 
 pub fn on_mouse(app: &mut App, m: MouseEvent) {
     let pos = Position::new(m.column, m.row);
